@@ -491,8 +491,8 @@ static const sdram_params_t210_t _dram_cfg_0_samsung_4gb = {
 
 	/* DRAM size information */
 	.mc_emem_adr_cfg                                 = 0x00000001, // 2 Ranks.
-	.mc_emem_adr_cfg_dev0                            = 0x00070302, // Rank 0 Density 512MB.
-	.mc_emem_adr_cfg_dev1                            = 0x00070302, // Rank 1 Density 512MB.
+	.mc_emem_adr_cfg_dev0                            = 0x00080302, // Rank 0 Density 1024MB.
+	.mc_emem_adr_cfg_dev1                            = 0x00080302, // Rank 1 Density 1024MB.
 	.mc_emem_adr_cfg_channel_mask                    = 0xFFFF2400,
 	.mc_emem_adr_cfg_bank_mask0                      = 0x6E574400,
 	.mc_emem_adr_cfg_bank_mask1                      = 0x39722800,
@@ -501,7 +501,7 @@ static const sdram_params_t210_t _dram_cfg_0_samsung_4gb = {
 	 * Specifies the value for MC_EMEM_CFG which holds the external memory
 	 * size (in KBytes)
 	 */
-	.mc_emem_cfg                                     = 0x00001000, // 4GB total density.
+	.mc_emem_cfg                                     = 0x00002000, // 8GB total density.
 
 	/* MC arbitration configuration */
 	.mc_emem_arb_cfg                                 = 0x08000001,
