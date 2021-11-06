@@ -930,12 +930,13 @@ static void _check_sd_card_removed(void *params)
 		lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
 		static const char * mbox_btn_map[] = { "\221Reboot (RCM)", "\221Power Off", "\221Do not reload", "" };
+		static const char * mbox_btn_map_rcm_patched[] = { "\221Reboot", "\221Power Off", "\221Do not reload", "" };
 		lv_obj_t *mbox = lv_mbox_create(dark_bg, NULL);
 		lv_mbox_set_recolor_text(mbox, true);
 		lv_obj_set_width(mbox, LV_HOR_RES * 6 / 9);
 
 		lv_mbox_set_text(mbox, "\n#FF8000 SD card was removed!#\n\n#96FF00 Nyx will reload after inserting it.#\n");
-		lv_mbox_add_btns(mbox, mbox_btn_map, _removed_sd_action);
+		lv_mbox_add_btns(mbox, h_cfg.rcm_patched ? mbox_btn_map_rcm_patched : mbox_btn_map, _removed_sd_action);
 
 		lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 		lv_obj_set_top(mbox, true);
@@ -987,7 +988,8 @@ static lv_res_t _create_mbox_reload(lv_obj_t *btn)
 	lv_mbox_set_recolor_text(mbox, true);
 	lv_obj_set_width(mbox, LV_HOR_RES * 4 / 10);
 
-	lv_mbox_set_text(mbox, "#FF8000 Do you really want#\n#FF8000 to reload hekate?#");
+	lv_mbox_set_text(mbox, "#FF8000 Do you really want#\n#FF8000 to reload hekate & Nyx?#\n\n"
+		"This also checks\n#96FF00 bootloader/update.bin#\nfor hekate updates");
 
 	lv_mbox_add_btns(mbox, mbox_btn_map, reload_action);
 
@@ -1207,7 +1209,7 @@ static void _create_tab_about(lv_theme_t * th, lv_obj_t * parent)
 
 static void _update_status_bar(void *params)
 {
-	char *label = (char *)malloc(128);
+	static char *label = NULL;
 
 	u16 soc_temp = 0;
 	u32 batt_percent = 0;
@@ -1237,6 +1239,9 @@ static void _update_status_bar(void *params)
 		set_fan_duty(51);
 	else if (soc_temp_dec < 40)
 		set_fan_duty(0);
+
+	if (!label)
+		label = (char *)malloc(512);
 
 	// Set time and SoC temperature.
 	s_printf(label, "%02d:%02d "SYMBOL_DOT" "SYMBOL_TEMPERATURE" %02d.%d",
@@ -1281,8 +1286,6 @@ static void _update_status_bar(void *params)
 
 	lv_label_set_text(status_bar.battery_more, label);
 	lv_obj_realign(status_bar.battery_more);
-
-	free(label);
 }
 
 static lv_res_t _create_mbox_payloads(lv_obj_t *btn)
@@ -1339,8 +1342,13 @@ out_end:
 
 	return LV_RES_OK;
 }
+typedef struct _launch_menu_entries_t
+{
+	lv_obj_t *btn[16];
+	lv_obj_t *label[16];
+} launch_menu_entries_t;
 
-static lv_obj_t *launch_ctxt[16];
+static launch_menu_entries_t launch_ctxt;
 static lv_obj_t *launch_bg = NULL;
 static bool launch_bg_done = false;
 
@@ -1358,7 +1366,7 @@ static lv_res_t _win_launch_close_action(lv_obj_t * btn)
 	// Cleanup icons.
 	for (u32 i = 0; i < 8; i++)
 	{
-		lv_obj_t *btn = launch_ctxt[i * 2];
+		lv_obj_t *btn = launch_ctxt.btn[i];
 		lv_btn_ext_t *ext = lv_obj_get_ext_attr(btn);
 		if (ext->idx)
 		{
@@ -1549,7 +1557,7 @@ static lv_res_t _create_window_home_launch(lv_obj_t *btn)
 	// Icons must be <= 192 x 192.
 	// Create first Button.
 	btn_boot_entry = lv_btn_create(win, NULL);
-	launch_ctxt[0] = btn_boot_entry;
+	launch_ctxt.btn[0] = btn_boot_entry;
 	lv_obj_set_size(btn_boot_entry, 200, 200);
 	lv_obj_set_pos(btn_boot_entry, launch_button_pos[0].btn_x, launch_button_pos[0].btn_y);
 	lv_obj_set_opa_scale(btn_boot_entry, LV_OPA_0);
@@ -1560,7 +1568,7 @@ static lv_res_t _create_window_home_launch(lv_obj_t *btn)
 	boot_entry_label = lv_label_create(boot_entry_lbl_cont, NULL);
 	lv_obj_set_style(boot_entry_label, &hint_small_style_white);
 	lv_label_set_text(boot_entry_label, "");
-	launch_ctxt[1] = boot_entry_label;
+	launch_ctxt.label[0] = boot_entry_label;
 
 	lv_cont_set_fit(boot_entry_lbl_cont, false, false);
 	lv_cont_set_layout(boot_entry_lbl_cont, LV_LAYOUT_CENTER);
@@ -1569,16 +1577,16 @@ static lv_res_t _create_window_home_launch(lv_obj_t *btn)
 	lv_obj_set_style(boot_entry_lbl_cont, &btn_label_home_transp);
 
 	// Create the rest of the buttons.
-	for (u32 btn_idx = 2; btn_idx < 16; btn_idx += 2)
+	for (u32 btn_idx = 1; btn_idx < 8; btn_idx++)
 	{
 		btn_boot_entry = lv_btn_create(win, btn_boot_entry);
-		launch_ctxt[btn_idx] = btn_boot_entry;
-		lv_obj_set_pos(btn_boot_entry, launch_button_pos[btn_idx >> 1].btn_x, launch_button_pos[btn_idx >> 1].btn_y);
+		launch_ctxt.btn[btn_idx] = btn_boot_entry;
+		lv_obj_set_pos(btn_boot_entry, launch_button_pos[btn_idx].btn_x, launch_button_pos[btn_idx].btn_y);
 
 		boot_entry_lbl_cont = lv_cont_create(win, boot_entry_lbl_cont);
 		boot_entry_label = lv_label_create(boot_entry_lbl_cont, boot_entry_label);
-		lv_obj_set_pos(boot_entry_lbl_cont, launch_button_pos[btn_idx >> 1].lbl_x, launch_button_pos[btn_idx >> 1].lbl_y);
-		launch_ctxt[btn_idx + 1] = boot_entry_label;
+		lv_obj_set_pos(boot_entry_lbl_cont, launch_button_pos[btn_idx].lbl_x, launch_button_pos[btn_idx].lbl_y);
+		launch_ctxt.label[btn_idx] = boot_entry_label;
 	}
 
 	// Create colorized icon style based on its parrent style.
@@ -1618,7 +1626,7 @@ ini_parsing:
 		if (ini_parse_success)
 		{
 			// Iterate to all boot entries and load icons.
-			u32 i = 1;
+			u32 entry_idx = 1;
 
 			LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_sections, link)
 			{
@@ -1672,7 +1680,7 @@ ini_parsing:
 				}
 
 				// Enable button.
-				lv_obj_set_opa_scale(launch_ctxt[curr_btn_idx], LV_OPA_COVER);
+				lv_obj_set_opa_scale(launch_ctxt.btn[curr_btn_idx], LV_OPA_COVER);
 
 				// Default to switch logo if no icon found at all.
 				if (!bmp)
@@ -1686,7 +1694,7 @@ ini_parsing:
 				//Set icon.
 				if (bmp)
 				{
-					img = lv_img_create(launch_ctxt[curr_btn_idx], NULL);
+					img = lv_img_create(launch_ctxt.btn[curr_btn_idx], NULL);
 
 					if (img_colorize)
 						lv_img_set_style(img, &img_style);
@@ -1695,7 +1703,7 @@ ini_parsing:
 				}
 
 				// Add button mask/radius and align icon.
-				lv_obj_t *btn = lv_btn_create(launch_ctxt[curr_btn_idx], NULL);
+				lv_obj_t *btn = lv_btn_create(launch_ctxt.btn[curr_btn_idx], NULL);
 				lv_obj_set_size(btn, 200, 200);
 				lv_btn_set_style(btn, LV_BTN_STYLE_REL, &btn_home_transp_rel);
 				lv_btn_set_style(btn, LV_BTN_STYLE_PR, &btn_home_transp_pr);
@@ -1704,9 +1712,9 @@ ini_parsing:
 
 				// Set autoboot index.
 				ext = lv_obj_get_ext_attr(btn);
-				ext->idx = i;
-				ext = lv_obj_get_ext_attr(launch_ctxt[curr_btn_idx]); // Redundancy.
-				ext->idx = i;
+				ext->idx = entry_idx;
+				ext = lv_obj_get_ext_attr(launch_ctxt.btn[curr_btn_idx]); // Redundancy.
+				ext->idx = entry_idx;
 
 				// Set action.
 				if (!more_cfg)
@@ -1715,26 +1723,27 @@ ini_parsing:
 					lv_btn_set_action(btn, LV_BTN_ACTION_CLICK, _launch_more_cfg_action);
 
 				// Set button's label text.
-				lv_label_set_text(launch_ctxt[curr_btn_idx + 1], ini_sec->name);
-				lv_obj_set_opa_scale(launch_ctxt[curr_btn_idx + 1], LV_OPA_COVER);
+				lv_label_set_text(launch_ctxt.label[curr_btn_idx], ini_sec->name);
+				lv_obj_set_opa_scale(launch_ctxt.label[curr_btn_idx], LV_OPA_COVER);
 
 				// Set rolling text if name is big.
 				if (strlen(ini_sec->name) > 22)
-					lv_label_set_long_mode(boot_entry_label, LV_LABEL_LONG_ROLL);
+					lv_label_set_long_mode(launch_ctxt.label[curr_btn_idx], LV_LABEL_LONG_ROLL);
 
-				i++;
-				curr_btn_idx += 2;
+				entry_idx++;
+				curr_btn_idx++;
 
-				if (curr_btn_idx >= (max_entries * 2))
+				// Check if we exceed max buttons.
+				if (curr_btn_idx >= max_entries)
 					break;
 			}
 		}
 		// Reiterate the loop with more cfgs if combined.
-		if (combined_cfg && (curr_btn_idx < 16) && !more_cfg)
+		if (combined_cfg && (curr_btn_idx < 8) && !more_cfg)
 			goto ini_parsing;
 	}
 
-	if (curr_btn_idx < 2)
+	if (curr_btn_idx < 1)
 		no_boot_entries = true;
 
 	sd_unmount();
@@ -1868,7 +1877,7 @@ static void _create_tab_home(lv_theme_t *th, lv_obj_t *parent)
 	label_btn = lv_label_create(btn_emummc, label_btn);
 	s_printf(btn_colored_text, "%s%s", text_color, " "SYMBOL_LIST"#");
 	lv_label_set_text(label_btn, btn_colored_text);
-	lv_btn_set_action(btn_emummc, LV_BTN_ACTION_CLICK,create_win_emummc_tools);
+	lv_btn_set_action(btn_emummc, LV_BTN_ACTION_CLICK, create_win_emummc_tools);
 	lv_btn_set_layout(btn_emummc, LV_LAYOUT_OFF);
 	lv_obj_align(label_btn, NULL, LV_ALIGN_CENTER, 0, -28);
 	lv_obj_set_pos(btn_emummc, 959, 160);
@@ -2208,31 +2217,11 @@ static void _nyx_main_menu(lv_theme_t * th)
 	// Option save button.
 	lv_tabview_set_tab_load_action(tv, _show_hide_save_button);
 
-	// If we rebooted to run sept for dumping, lunch dump immediately.
-	if (nyx_str->cfg & NYX_CFG_SEPT)
-	{
-		u32 type = nyx_str->cfg >> 24;
-		nyx_str->cfg &= ~(NYX_CFG_SEPT | NYX_CFG_EXTRA);
-
-		if (type == NYX_SEPT_DUMP)
-		{
-			lv_task_t *task_run_dump = lv_task_create(sept_run_dump, LV_TASK_ONESHOT, LV_TASK_PRIO_MID, NULL);
-			lv_task_once(task_run_dump);
-		}
-		else if (type == NYX_SEPT_CAL0)
-		{
-			lv_task_t *task_run_cal0 = lv_task_create(sept_run_cal0, LV_TASK_ONESHOT, LV_TASK_PRIO_LOWEST, NULL);
-			lv_task_once(task_run_cal0);
-		}
-		else if (type == NYX_SEPT_EMUF)
-		{
-			// TODO: Maybe automatically relaunch emuMMC creation in the future.
-		}
-	}
-	else if (nyx_str->cfg & NYX_CFG_UMS)
+	// Check if Nyx was launched with a function set.
+	if (nyx_str->cfg & NYX_CFG_UMS)
 	{
 		nyx_str->cfg &= ~(NYX_CFG_UMS);
-		lv_task_t *task_run_ums = lv_task_create(nyx_run_ums, LV_TASK_ONESHOT, LV_TASK_PRIO_MID, (void *)&nyx_str->cfg);
+		lv_task_t *task_run_ums = lv_task_create(nyx_run_ums, LV_TASK_ONESHOT, LV_TASK_PRIO_LOWEST, (void *)&nyx_str->cfg);
 		lv_task_once(task_run_ums);
 	}
 	else if (n_cfg.home_screen)

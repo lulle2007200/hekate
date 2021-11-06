@@ -28,7 +28,6 @@
 #include "../hos/pkg1.h"
 #include "../hos/pkg2.h"
 #include "../hos/hos.h"
-#include "../hos/sept.h"
 #include <input/touch.h>
 #include <libs/fatfs/ff.h>
 #include <mem/heap.h>
@@ -36,6 +35,8 @@
 #include <sec/se.h>
 #include <soc/bpmp.h>
 #include <soc/fuse.h>
+#include <soc/hw_init.h>
+#include <soc/t210.h>
 #include "../storage/nx_emmc.h"
 #include <storage/nx_sd.h>
 #include <storage/sdmmc.h>
@@ -68,8 +69,9 @@ static lv_obj_t *_create_container(lv_obj_t *parent)
 	return h1;
 }
 
-bool get_autorcm_status(bool change)
+bool get_autorcm_status(bool toggle)
 {
+	u32 sector;
 	u8 corr_mod0, mod1;
 	bool enabled = false;
 
@@ -92,24 +94,47 @@ bool get_autorcm_status(bool change)
 	if (tempbuf[0x10] != corr_mod0)
 		enabled = true;
 
-	// Change autorcm status if requested.
-	if (change)
+	// Toggle autorcm status if requested.
+	if (toggle)
 	{
-		int i, sect = 0;
-
 		// Iterate BCTs.
-		for (i = 0; i < 4; i++)
+		for (u32 i = 0; i < 4; i++)
 		{
-			sect = (0x200 + (0x4000 * i)) / NX_EMMC_BLOCKSIZE;
-			sdmmc_storage_read(&emmc_storage, sect, 1, tempbuf);
+			sector = (0x200 + (0x4000 * i)) / NX_EMMC_BLOCKSIZE; // 0x4000 bct + 0x200 offset.
+			sdmmc_storage_read(&emmc_storage, sector, 1, tempbuf);
 
 			if (!enabled)
 				tempbuf[0x10] = 0;
 			else
 				tempbuf[0x10] = corr_mod0;
-			sdmmc_storage_write(&emmc_storage, sect, 1, tempbuf);
+			sdmmc_storage_write(&emmc_storage, sector, 1, tempbuf);
 		}
-		enabled = !(enabled);
+		enabled = !enabled;
+	}
+
+	// Check if RCM is patched and protect from a possible brick.
+	if (enabled && h_cfg.rcm_patched && hw_get_chip_id() != GP_HIDREV_MAJOR_T210B01)
+	{
+		// Iterate BCTs.
+		for (u32 i = 0; i < 4; i++)
+		{
+			sector = (0x200 + (0x4000 * i)) / NX_EMMC_BLOCKSIZE; // 0x4000 bct + 0x200 offset.
+			sdmmc_storage_read(&emmc_storage, sector, 1, tempbuf);
+
+			// Check if 2nd byte of modulus is correct.
+			if (tempbuf[0x11] != mod1)
+				continue;
+
+			// If AutoRCM is enabled, disable it.
+			if (tempbuf[0x10] != corr_mod0)
+			{
+				tempbuf[0x10] = corr_mod0;
+
+				sdmmc_storage_write(&emmc_storage, sector, 1, tempbuf);
+			}
+		}
+
+		enabled = false;
 	}
 
 out:
@@ -170,7 +195,7 @@ static lv_res_t _create_mbox_hid(usb_ctxt_t *usbs)
 	lv_obj_t *mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 
-	char *txt_buf = malloc(0x1000);
+	char *txt_buf = malloc(SZ_4K);
 
 	s_printf(txt_buf, "#FF8000 HID Emulation#\n\n#C7EA46 Device:# ");
 
@@ -215,7 +240,7 @@ static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs)
 	lv_obj_t *mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 
-	char *txt_buf = malloc(0x1000);
+	char *txt_buf = malloc(SZ_4K);
 
 	s_printf(txt_buf, "#FF8000 USB Mass Storage#\n\n#C7EA46 Device:# ");
 
@@ -952,7 +977,7 @@ static lv_res_t _create_mbox_fix_touchscreen(lv_obj_t *btn)
 	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 
-	char *txt_buf = malloc(0x4000);
+	char *txt_buf = malloc(SZ_16K);
 	strcpy(txt_buf, "#FF8000 Don't touch the screen!#\n\nThe tuning process will start in ");
 	u32 text_idx = strlen(txt_buf);
 	lv_mbox_set_text(mbox, txt_buf);
@@ -1085,13 +1110,13 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	char path[128];
 
 	u8 kb = 0;
-	u8 *pkg1 = (u8 *)calloc(1, 0x40000);
-	u8 *warmboot = (u8 *)calloc(1, 0x40000);
-	u8 *secmon = (u8 *)calloc(1, 0x40000);
-	u8 *loader = (u8 *)calloc(1, 0x40000);
+	u8 *pkg1 = (u8 *)calloc(1, SZ_256K);
+	u8 *warmboot = (u8 *)calloc(1, SZ_256K);
+	u8 *secmon = (u8 *)calloc(1, SZ_256K);
+	u8 *loader = (u8 *)calloc(1, SZ_256K);
 	u8 *pkg2 = NULL;
 
-	char *txt_buf  = (char *)malloc(0x4000);
+	char *txt_buf  = (char *)malloc(SZ_16K);
 
 	if (!sdmmc_storage_init_mmc(&emmc_storage, &emmc_sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400))
 	{
@@ -1103,7 +1128,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	sdmmc_storage_set_mmc_partition(&emmc_storage, EMMC_BOOT0);
 
 	// Read package1.
-	static const u32 BOOTLOADER_SIZE          = 0x40000;
+	static const u32 BOOTLOADER_SIZE          = SZ_256K;
 	static const u32 BOOTLOADER_MAIN_OFFSET   = 0x100000;
 	static const u32 HOS_KEYBLOBS_OFFSET      = 0x180000;
 
@@ -1118,82 +1143,42 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	lv_label_set_text(lb_desc, txt_buf);
 	manual_system_maintenance(true);
 
-	// Dump package1 in its encrypted state if unknown.
+	// Dump package1 in its encrypted state.
+	emmcsn_path_impl(path, "/pkg1", "pkg1_enc.bin", &emmc_storage);
+	bool res = sd_save_to_file(pkg1, BOOTLOADER_SIZE, path);
+
+	// Exit if unknown.
 	if (!pkg1_id)
 	{
 		strcat(txt_buf, "#FFDD00 Unknown pkg1 version!#");
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
-		emmcsn_path_impl(path, "/pkg1", "pkg1_enc.bin", &emmc_storage);
-		if (sd_save_to_file(pkg1, BOOTLOADER_SIZE, path))
-			goto out_free;
-
-		strcat(txt_buf, "\nEncrypted pkg1 dumped to pkg1_enc.bin");
-		lv_label_set_text(lb_desc, txt_buf);
-		manual_system_maintenance(true);
+		if (!res)
+		{
+			strcat(txt_buf, "\nEncrypted pkg1 dumped to pkg1_enc.bin");
+			lv_label_set_text(lb_desc, txt_buf);
+			manual_system_maintenance(true);
+		}
 
 		goto out_free;
 	}
 
 	kb = pkg1_id->kb;
 
-	if (!h_cfg.se_keygen_done)
-	{
-		tsec_ctxt_t tsec_ctxt;
-		tsec_ctxt.fw = (void *)(pkg1 + pkg1_id->tsec_off);
-		tsec_ctxt.pkg1 = (void *)pkg1;
-		tsec_ctxt.pkg11_off = pkg1_id->pkg11_off;
-		tsec_ctxt.secmon_base = pkg1_id->secmon_base;
+	tsec_ctxt_t tsec_ctxt = {0};
+	tsec_ctxt.fw = (void *)(pkg1 + pkg1_id->tsec_off);
+	tsec_ctxt.pkg1 = (void *)pkg1;
+	tsec_ctxt.pkg11_off = pkg1_id->pkg11_off;
+	tsec_ctxt.secmon_base = pkg1_id->secmon_base;
 
-		hos_eks_get();
+	// Read keyblob.
+	u8 *keyblob = (u8 *)calloc(NX_EMMC_BLOCKSIZE, 1);
+	sdmmc_storage_read(&emmc_storage, HOS_KEYBLOBS_OFFSET / NX_EMMC_BLOCKSIZE + kb, 1, keyblob);
 
-		if (!h_cfg.t210b01 && kb >= KB_FIRMWARE_VERSION_700 && !h_cfg.sept_run)
-		{
-			u32 key_idx = 0;
-			if (kb >= KB_FIRMWARE_VERSION_810)
-				key_idx = 1;
-
-			if (h_cfg.eks && h_cfg.eks->enabled[key_idx] >= kb)
-				h_cfg.sept_run = true;
-			else
-			{
-				// Check that BCT is proper so sept can run.
-				u8 *bct_bldr = (u8 *)calloc(1, 512);
-				sdmmc_storage_read(&emmc_storage, 0x2200 / NX_EMMC_BLOCKSIZE, 1, bct_bldr);
-				u32 bootloader_entrypoint = *(u32 *)&bct_bldr[0x144];
-				free(bct_bldr);
-				if (bootloader_entrypoint > SEPT_PRI_ENTRY)
-				{
-					lv_label_set_text(lb_desc, "#FFDD00 Failed to run sept because main BCT is improper!#\n"
-						"#FFDD00 Run sept with proper BCT at least once to cache keys.#\n");
-					goto out_free;
-				}
-
-				// Set boot cfg.
-				b_cfg->autoboot = 0;
-				b_cfg->autoboot_list = 0;
-				b_cfg->extra_cfg = EXTRA_CFG_NYX_SEPT;
-				b_cfg->sept = NYX_SEPT_DUMP;
-
-				if (!reboot_to_sept((u8 *)tsec_ctxt.fw, kb))
-				{
-					lv_label_set_text(lb_desc, "#FFDD00 Failed to run sept#\n");
-					goto out_free;
-				}
-			}
-		}
-
-		// Read keyblob.
-		u8 *keyblob = (u8 *)calloc(NX_EMMC_BLOCKSIZE, 1);
-		sdmmc_storage_read(&emmc_storage, HOS_KEYBLOBS_OFFSET / NX_EMMC_BLOCKSIZE + kb, 1, keyblob);
-
-		// Decrypt.
-		hos_keygen(keyblob, kb, &tsec_ctxt);
-		if (kb <= KB_FIRMWARE_VERSION_600)
-			h_cfg.se_keygen_done = 1;
-		free(keyblob);
-	}
+	// Decrypt.
+	hos_keygen(keyblob, kb, &tsec_ctxt);
+	free(keyblob);
 
 	if (h_cfg.t210b01 || kb <= KB_FIRMWARE_VERSION_600)
 	{
@@ -1239,7 +1224,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 		// Dump package1.1.
 		emmcsn_path_impl(path, "/pkg1", "pkg1_decr.bin", &emmc_storage);
-		if (sd_save_to_file(pkg1, 0x40000, path))
+		if (sd_save_to_file(pkg1, SZ_256K, path))
 			goto out_free;
 		strcat(txt_buf, "pkg1 dumped to pkg1_decr.bin\n");
 		lv_label_set_text(lb_desc, txt_buf);
@@ -1270,7 +1255,8 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 		{
 
 			se_aes_iv_clear(13);
-			se_aes_crypt_cbc(13, 0, warmboot + 0x330, hdr_pk11->wb_size - 0x330, warmboot + 0x330, hdr_pk11->wb_size - 0x330);
+			se_aes_crypt_cbc(13, DECRYPT, warmboot + 0x330, hdr_pk11->wb_size - 0x330,
+				warmboot + 0x330, hdr_pk11->wb_size - 0x330);
 			emmcsn_path_impl(path, "/pkg1", "warmboot_dec.bin", &emmc_storage);
 			if (sd_save_to_file(warmboot, hdr_pk11->wb_size, path))
 				goto out_free;
@@ -1301,12 +1287,10 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	pkg2 = malloc(pkg2_size_aligned);
 	nx_emmc_part_read(&emmc_storage, pkg2_part, 0x4000 / NX_EMMC_BLOCKSIZE,
 		pkg2_size_aligned / NX_EMMC_BLOCKSIZE, pkg2);
-#if 0
+
+	// Dump encrypted package2.
 	emmcsn_path_impl(path, "/pkg2", "pkg2_encr.bin", &emmc_storage);
-	if (sd_save_to_file(pkg2, pkg2_size_aligned, path))
-		goto out;
-	gfx_puts("\npkg2 dumped to pkg2_encr.bin\n");
-#endif
+	res = sd_save_to_file(pkg2, pkg2_size, path);
 
 	// Decrypt package2 and parse KIP1 blobs in INI1 section.
 	pkg2_hdr_t *pkg2_hdr = pkg2_decrypt(pkg2, kb);
@@ -1316,13 +1300,18 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 		lv_label_set_text(lb_desc, txt_buf);
 		manual_system_maintenance(true);
 
-		// Clear EKS slot, in case something went wrong with sept keygen.
+		if (!res)
+		{
+			strcat(txt_buf, "\npkg2 encrypted dumped to pkg2_encr.bin\n");
+			lv_label_set_text(lb_desc, txt_buf);
+			manual_system_maintenance(true);
+		}
+
+		// Clear EKS slot, in case something went wrong with tsec keygen.
 		hos_eks_clear(kb);
 
 		goto out;
 	}
-	else if (kb >= KB_FIRMWARE_VERSION_700)
-		hos_eks_save(kb); // Save EKS slot if it doesn't exist.
 
 	// Display info.
 	s_printf(txt_buf + strlen(txt_buf),
@@ -1379,7 +1368,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	ptr += sizeof(pkg2_ini1_t);
 
 	// Dump all kips.
-	u8 *kip_buffer = (u8 *)malloc(0x400000);
+	u8 *kip_buffer = (u8 *)malloc(SZ_4M);
 
 	for (u32 i = 0; i < ini1->num_procs; i++)
 	{
@@ -1427,11 +1416,6 @@ out_end:
 	nyx_window_toggle_buttons(win, false);
 
 	return LV_RES_OK;
-}
-
-void sept_run_dump(void *param)
-{
-	_create_window_dump_pk12_tool(NULL);
 }
 
 static void _create_tab_tools_emmc_pkg12(lv_theme_t *th, lv_obj_t *parent)
@@ -1656,7 +1640,7 @@ static void _create_tab_tools_arc_autorcm(lv_theme_t *th, lv_obj_t *parent)
 	}
 	autorcm_btn = btn3;
 
-	char *txt_buf = (char *)malloc(0x1000);
+	char *txt_buf = (char *)malloc(SZ_4K);
 
 	s_printf(txt_buf,
 		"Allows you to enter RCM without using #C7EA46 VOL+# & #C7EA46 HOME# (jig).\n"

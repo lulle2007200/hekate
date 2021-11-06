@@ -71,8 +71,6 @@ typedef struct _partition_ctxt_t
 	lv_obj_t *lbl_emu;
 	lv_obj_t *lbl_l4t;
 	lv_obj_t *lbl_and;
-
-	lv_obj_t *btn_partition;
 } partition_ctxt_t;
 
 typedef struct _l4t_flasher_ctxt_t
@@ -139,7 +137,7 @@ static int _backup_and_restore_files(char *path, u32 *total_files, u32 *total_si
 			if ((file_size + *total_size) < *total_size)
 			{
 				// Set size to > 1GB, skip next folders and return.
-				*total_size = 0x80000000;
+				*total_size = SZ_2G;
 				res = -1;
 				break;
 			}
@@ -163,7 +161,7 @@ static int _backup_and_restore_files(char *path, u32 *total_files, u32 *total_si
 
 				while (file_size)
 				{
-					u32 chunk_size = MIN(file_size, 0x400000); // 4MB chunks.
+					u32 chunk_size = MIN(file_size, SZ_4M); // 4MB chunks.
 					file_size -= chunk_size;
 
 					// Copy file to buffer.
@@ -184,7 +182,7 @@ static int _backup_and_restore_files(char *path, u32 *total_files, u32 *total_si
 			}
 
 			// If total is > 1GB exit.
-			if (*total_size > (RAM_DISK_SZ - 0x1000000)) // 0x2400000.
+			if (*total_size > (RAM_DISK_SZ - SZ_16M)) // 0x2400000.
 			{
 				// Skip next folders and return.
 				res = -1;
@@ -234,7 +232,7 @@ static void _prepare_and_flash_mbr_gpt()
 		memcpy(&mbr.bootstrap[0x80], &part_info.mbr_old.bootstrap[0x80], 304);
 
 	// Clear the first 16MB.
-	memset((void *)SDMMC_UPPER_BUFFER, 0, 0x8000);
+	memset((void *)SDMMC_UPPER_BUFFER, 0, SZ_16M);
 	sdmmc_storage_write(&sd_storage, 0, 0x8000, (void *)SDMMC_UPPER_BUFFER);
 
 	u8 mbr_idx = 1;
@@ -488,17 +486,13 @@ static lv_res_t _action_part_manager_ums_sd(lv_obj_t *btn)
 {
 	action_ums_sd(btn);
 
-	if (lv_btn_get_state(part_info.btn_partition) != LV_BTN_STATE_INA)
-	{
-		lv_action_t close_btn_action = lv_btn_get_action(close_btn, LV_BTN_ACTION_CLICK);
-		close_btn_action(close_btn);
-		lv_obj_del(ums_mbox);
-		create_window_partition_manager(NULL);
+	// Close and reopen partition manager.
+	lv_action_t close_btn_action = lv_btn_get_action(close_btn, LV_BTN_ACTION_CLICK);
+	close_btn_action(close_btn);
+	lv_obj_del(ums_mbox);
+	create_window_partition_manager(NULL);
 
-		return LV_RES_INV;
-	}
-
-	return LV_RES_OK;
+	return LV_RES_INV;
 }
 
 static lv_res_t _action_delete_linux_installer_files(lv_obj_t * btns, const char * txt)
@@ -597,7 +591,7 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 
 		int res = 0;
 		char *path = malloc(1024);
-		char *txt_buf = malloc(0x1000);
+		char *txt_buf = malloc(SZ_4K);
 		strcpy(path, "switchroot/install/l4t.00");
 		u32 path_len = strlen(path) - 2;
 
@@ -623,7 +617,7 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 		u32 total_size_sct = l4t_flash_ctxt.image_size_sct;
 
 		u8 *buf = (u8 *)MIXD_BUF_ALIGNED;
-		DWORD *clmt = f_expand_cltbl(&fp, 0x400000, 0);
+		DWORD *clmt = f_expand_cltbl(&fp, SZ_4M, 0);
 
 		while (total_size_sct > 0)
 		{
@@ -656,7 +650,7 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 				}
 				fileSize = (u64)f_size(&fp);
 				bytesWritten = 0;
-				clmt = f_expand_cltbl(&fp, 0x400000, 0);
+				clmt = f_expand_cltbl(&fp, SZ_4M, 0);
 			}
 
 			retryCount = 0;
@@ -873,7 +867,7 @@ static lv_res_t _action_check_flash_linux(lv_obj_t *btn)
 		// Check for alignment.
 		if (!f_stat(path, &fno))
 		{
-			if ((u64)fno.fsize % 0x400000)
+			if ((u64)fno.fsize % SZ_4M)
 			{
 				// Check if last part.
 				idx++;
@@ -910,7 +904,7 @@ static lv_res_t _action_check_flash_linux(lv_obj_t *btn)
 		goto error;
 	}
 
-	char *txt_buf = malloc(0x1000);
+	char *txt_buf = malloc(SZ_4K);
 	s_printf(txt_buf,
 		"#C7EA46 Status:# Found installation files and partition.\n"
 		"#00DDFF Offset:# %08x, #00DDFF Size:# %X, #00DDFF Image size:# %d MiB\n"
@@ -970,7 +964,7 @@ static lv_res_t _action_flash_android_data(lv_obj_t * btns, const char * txt)
 	{
 		char path[128];
 		gpt_t *gpt = calloc(1, sizeof(gpt_t));
-		char *txt_buf = malloc(0x1000);
+		char *txt_buf = malloc(SZ_4K);
 
 		lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
 		lv_obj_set_style(dark_bg, &mbox_darken);
@@ -1315,7 +1309,7 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 
 	if (!part_info.backup_possible)
 	{
-		char *txt_buf = malloc(0x1000);
+		char *txt_buf = malloc(SZ_4K);
 		strcpy(txt_buf, "#FF8000 Partition Manager#\n\nSafety wait ends in ");
 		lv_mbox_set_text(mbox, txt_buf);
 
@@ -1420,17 +1414,17 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 	u32 part_rsvd_size = (part_info.emu_size << 11) + (part_info.l4t_size << 11) + (part_info.and_size << 11);
 	part_rsvd_size += part_info.alignment;
 	disk_set_info(DRIVE_SD, SET_SECTOR_COUNT, &part_rsvd_size);
-	u8 *buf = malloc(0x400000);
+	u8 *buf = malloc(SZ_4M);
 
 	u32 cluster_size = 65536;
-	u32 mkfs_error = f_mkfs("sd:", FM_FAT32, cluster_size, buf, 0x400000);
+	u32 mkfs_error = f_mkfs("sd:", FM_FAT32, cluster_size, buf, SZ_4M);
 	if (mkfs_error)
 	{
 		// Retry by halving cluster size.
 		while (cluster_size > 4096)
 		{
 			cluster_size /= 2;
-			mkfs_error = f_mkfs("sd:", FM_FAT32, cluster_size, buf, 0x400000);
+			mkfs_error = f_mkfs("sd:", FM_FAT32, cluster_size, buf, SZ_4M);
 
 			if (!mkfs_error)
 				break;
@@ -1625,7 +1619,7 @@ static lv_res_t _create_mbox_partitioning_next(lv_obj_t *btn)
 	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 
-	char *txt_buf = malloc(0x1000);
+	char *txt_buf = malloc(SZ_4K);
 	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 6);
 	lv_mbox_set_text(mbox, "#FF8000 Partition Manager#");
 
@@ -1891,7 +1885,7 @@ static void create_mbox_check_files_total_size()
 	sep_and_bg.body.main_color = LV_COLOR_HEX(0xFF8000);
 	sep_and_bg.body.grad_color = sep_and_bg.body.main_color;
 
-	char *txt_buf = malloc(0x2000);
+	char *txt_buf = malloc(SZ_8K);
 
 	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
 	lv_obj_set_style(dark_bg, &mbox_darken);
@@ -1917,7 +1911,7 @@ static void create_mbox_check_files_total_size()
 	int res = _backup_and_restore_files(path, &total_files, &total_size, NULL, NULL, NULL);
 
 	// Not more than 1.0GB.
-	part_info.backup_possible = !res && !(total_size > (RAM_DISK_SZ - 0x1000000)); // 0x2400000
+	part_info.backup_possible = !res && !(total_size > (RAM_DISK_SZ - SZ_16M)); // 0x2400000
 
 	if (part_info.backup_possible)
 	{
@@ -2151,7 +2145,7 @@ static lv_res_t _action_fix_mbr(lv_obj_t *btn)
 		goto out;
 	}
 
-	char *txt_buf = malloc(0x4000);
+	char *txt_buf = malloc(SZ_16K);
 
 	s_printf(txt_buf, "#00DDFF Current MBR Layout:#\n");
 	s_printf(txt_buf + strlen(txt_buf),
@@ -2292,12 +2286,12 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn)
 	memset(&part_info, 0, sizeof(partition_ctxt_t));
 	create_mbox_check_files_total_size();
 
-	char *txt_buf = malloc(0x2000);
+	char *txt_buf = malloc(SZ_8K);
 
 	part_info.total_sct = sd_storage.sec_cnt;
 
 	// Align down total size to ensure alignment of all partitions after HOS one.
-	part_info.alignment = part_info.total_sct - ALIGN_DOWN(part_info.total_sct, 0x8000);	
+	part_info.alignment = part_info.total_sct - ALIGN_DOWN(part_info.total_sct, 0x8000);
 	part_info.total_sct -= part_info.alignment;
 
 	u32 extra_sct = 0x8000 + 0x400000; // Reserved 16MB alignment for FAT partition + 2GB.
@@ -2315,7 +2309,8 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn)
 	u32 bar_and_size = 0;
 
 	lv_obj_t *lbl = lv_label_create(h1, NULL);
-	lv_label_set_text(lbl, "New partition layout:");
+	lv_label_set_recolor(lbl, true);
+	lv_label_set_text(lbl, "Choose #FFDD00 new# partition layout:");
 
 	lv_obj_t *bar_hos = lv_bar_create(h1, NULL);
 	lv_obj_set_size(bar_hos, bar_hos_size, LV_DPI / 2);
@@ -2493,7 +2488,6 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn)
 	lv_label_set_static_text(label_btn, SYMBOL_SD"  Next Step");
 	lv_obj_align(btn1, h1, LV_ALIGN_IN_TOP_RIGHT, 0, LV_DPI * 5);
 	lv_btn_set_action(btn1, LV_BTN_ACTION_CLICK, _create_mbox_partitioning_next);
-	part_info.btn_partition = btn1;
 
 	free(txt_buf);
 

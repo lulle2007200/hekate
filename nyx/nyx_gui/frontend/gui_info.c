@@ -21,7 +21,6 @@
 #include "../config.h"
 #include "../hos/hos.h"
 #include "../hos/pkg1.h"
-#include "../hos/sept.h"
 #include <libs/fatfs/ff.h>
 #include <input/touch.h>
 #include <mem/emc.h>
@@ -54,6 +53,7 @@ extern hekate_config h_cfg;
 extern volatile boot_cfg_t *b_cfg;
 extern volatile nyx_storage_t *nyx_str;
 
+extern lv_res_t launch_payload(lv_obj_t *list);
 extern char *emmcsn_path_impl(char *path, char *sub_dir, char *filename, sdmmc_storage_t *storage);
 
 static u8 *cal0_buf = NULL;
@@ -69,7 +69,7 @@ static lv_res_t _create_window_dump_done(int error, char *dump_filenames)
 	lv_mbox_set_recolor_text(mbox, true);
 	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 5);
 
-	char *txt_buf = (char *)malloc(0x1000);
+	char *txt_buf = (char *)malloc(SZ_4K);
 
 	if (error)
 		s_printf(txt_buf, "#FFDD00 Failed to dump to# %s#FFDD00 !#\nError: %d", dump_filenames, error);
@@ -102,7 +102,7 @@ static lv_res_t _cal0_dump_window_action(lv_obj_t *btns, const char * txt)
 		{
 			char path[64];
 			emmcsn_path_impl(path, "/dumps", "cal0.bin", NULL);
-			error = sd_save_to_file((u8 *)cal0_buf, 0x8000, path);
+			error = sd_save_to_file((u8 *)cal0_buf, SZ_32K, path);
 
 			sd_unmount();
 		}
@@ -196,8 +196,7 @@ static lv_res_t _bootrom_dump_window_action(lv_obj_t * btn)
 
 static lv_res_t _fuse_dump_window_action(lv_obj_t * btn)
 {
-	const u32 fuse_array_size_t210    = 192 * sizeof(u32);
-	const u32 fuse_array_size_t210b01 = 256 * sizeof(u32);
+	const u32 fuse_array_size = (h_cfg.t210b01 ? 256 : 192) * sizeof(u32);
 
 	int error = !sd_mount();
 	if (!error)
@@ -217,13 +216,13 @@ static lv_res_t _fuse_dump_window_action(lv_obj_t * btn)
 				error = sd_save_to_file((u8 *)0x7000F900, 0x300, path);
 		}
 
-		u32 words[fuse_array_size_t210b01 / sizeof(u32)];
+		u32 words[256];
 		fuse_read_array(words);
 		if (!h_cfg.t210b01)
 			emmcsn_path_impl(path, "/dumps", "fuse_array_raw_t210.bin", NULL);
 		else
 			emmcsn_path_impl(path, "/dumps", "fuse_array_raw_t210b01.bin", NULL);
-		int res = sd_save_to_file((u8 *)words, h_cfg.t210b01 ? fuse_array_size_t210b01 : fuse_array_size_t210, path);
+		int res = sd_save_to_file((u8 *)words, fuse_array_size, path);
 		if (!error)
 			error = res;
 
@@ -233,7 +232,7 @@ static lv_res_t _fuse_dump_window_action(lv_obj_t * btn)
 	if (!h_cfg.t210b01)
 		_create_window_dump_done(error, "fuse_cached_t210.bin, fuse_array_raw_t210.bin");
 	else
-		_create_window_dump_done(error, "fuse_cached_t210b01_partX.bin, fuse_array_raw_t210b01.bin");
+		_create_window_dump_done(error, "fuse_cached_t210b01_x*.bin, fuse_array_raw_t210b01.bin");
 
 	return LV_RES_OK;
 }
@@ -260,24 +259,6 @@ static lv_res_t _kfuse_dump_window_action(lv_obj_t * btn)
 	return LV_RES_OK;
 }
 
-static u32 tsec_keys[8];
-
-static lv_res_t _tsec_keys_dump_window_action(lv_obj_t * btn)
-{
-	int error = !sd_mount();
-	if (!error)
-	{
-		char path[64];
-		emmcsn_path_impl(path, "/dumps", "tsec_keys.bin", NULL);
-		error = sd_save_to_file(tsec_keys, SE_KEY_128_SIZE * 2, path);
-
-		sd_unmount();
-	}
-	_create_window_dump_done(error, "tsec_keys.bin");
-
-	return LV_RES_OK;
-}
-
 static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 {
 	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
@@ -291,7 +272,7 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 
 	lv_mbox_set_text(mbox, "#C7EA46 CAL0 Info#");
 
-	char *txt_buf = (char *)malloc(0x4000);
+	char *txt_buf = (char *)malloc(SZ_16K);
 	txt_buf[0] = 0;
 
 	lv_obj_t * lb_desc = lv_label_create(mbox, NULL);
@@ -302,111 +283,19 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 
 	sd_mount();
 
-	// Read package1.
-	static const u32 BOOTLOADER_SIZE          = 0x40000;
-	static const u32 BOOTLOADER_MAIN_OFFSET   = 0x100000;
-	static const u32 BOOTLOADER_BACKUP_OFFSET = 0x140000;
-	static const u32 HOS_KEYBLOBS_OFFSET      = 0x180000;
-
-	u8 kb = 0;
-	u32 bootloader_offset = BOOTLOADER_MAIN_OFFSET;
-	u32 pk1_offset = h_cfg.t210b01 ? sizeof(bl_hdr_t210b01_t) : 0; // Skip T210B01 OEM header.
-	u8 *pkg1 = (u8 *)malloc(BOOTLOADER_SIZE);
-
+	// Init eMMC.
 	if (!sdmmc_storage_init_mmc(&emmc_storage, &emmc_sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400))
 	{
 		lv_label_set_text(lb_desc, "#FFDD00 Failed to init eMMC!#");
 
 		goto out;
 	}
-	sdmmc_storage_set_mmc_partition(&emmc_storage, EMMC_BOOT0);
-
-try_load:
-	sdmmc_storage_read(&emmc_storage, bootloader_offset / NX_EMMC_BLOCKSIZE, BOOTLOADER_SIZE / NX_EMMC_BLOCKSIZE, pkg1);
-
-	char *build_date = malloc(32);
-	const pkg1_id_t *pkg1_id = pkg1_identify(pkg1 + pk1_offset, build_date);
-
-	s_printf(txt_buf + strlen(txt_buf), "#00DDFF Found pkg1 ('%s')#\n", build_date);
-	free(build_date);
-
-	if (!pkg1_id)
-	{
-		strcat(txt_buf, "#FFDD00 Unknown pkg1 version!#\n");
-		// Try backup bootloader.
-		if (bootloader_offset != BOOTLOADER_BACKUP_OFFSET)
-		{
-			strcat(txt_buf, "Trying backup bootloader...\n");
-			bootloader_offset = BOOTLOADER_BACKUP_OFFSET;
-			goto try_load;
-		}
-		lv_label_set_text(lb_desc, txt_buf);
-
-		goto out;
-	}
-
-	kb = pkg1_id->kb;
-
-	// Skip if Mariko.
-	if (h_cfg.t210b01)
-		goto t210b01;
-
-	tsec_ctxt_t tsec_ctxt;
-	tsec_ctxt.fw = (u8 *)pkg1 + pkg1_id->tsec_off;
-	tsec_ctxt.pkg1 = pkg1;
-	tsec_ctxt.pkg11_off = pkg1_id->pkg11_off;
-	tsec_ctxt.secmon_base = pkg1_id->secmon_base;
-
-	// Get keys.
-	hos_eks_get();
-	if (kb >= KB_FIRMWARE_VERSION_700 && !h_cfg.sept_run)
-	{
-		u32 key_idx = 0;
-		if (kb >= KB_FIRMWARE_VERSION_810)
-			key_idx = 1;
-
-		if (h_cfg.eks && h_cfg.eks->enabled[key_idx] >= kb)
-			h_cfg.sept_run = true;
-		else
-		{
-			// Check that BCT is proper so sept can run.
-			u8 *bct_bldr = (u8 *)calloc(1, 512);
-			sdmmc_storage_read(&emmc_storage, 0x2200 / NX_EMMC_BLOCKSIZE, 1, bct_bldr);
-			u32 bootloader_entrypoint = *(u32 *)&bct_bldr[0x144];
-			free(bct_bldr);
-			if (bootloader_entrypoint > SEPT_PRI_ENTRY)
-			{
-				lv_label_set_text(lb_desc, "#FFDD00 Main BCT is improper! Failed to run sept.#\n"
-					"#FFDD00 Run sept with proper BCT at least once#\n#FFDD00 to cache keys.#\n");
-				goto out;
-			}
-
-			// Set boot cfg.
-			b_cfg->autoboot = 0;
-			b_cfg->autoboot_list = 0;
-			b_cfg->extra_cfg = EXTRA_CFG_NYX_SEPT;
-			b_cfg->sept = NYX_SEPT_CAL0;
-
-			if (!reboot_to_sept((u8 *)tsec_ctxt.fw, kb))
-			{
-				lv_label_set_text(lb_desc, "#FFDD00 Failed to run sept#\n");
-				goto out;
-			}
-		}
-	}
-
-t210b01:;
-	// Read the correct keyblob.
-	u8 *keyblob = (u8 *)calloc(NX_EMMC_BLOCKSIZE, 1);
-	sdmmc_storage_read(&emmc_storage, HOS_KEYBLOBS_OFFSET / NX_EMMC_BLOCKSIZE + kb, 1, keyblob);
 
 	// Generate BIS keys
-	hos_bis_keygen(keyblob, kb, &tsec_ctxt);
-
-	free(keyblob);
+	hos_bis_keygen();
 
 	if (!cal0_buf)
-		cal0_buf = malloc(0x10000);
+		cal0_buf = malloc(SZ_64K);
 
 	// Read and decrypt CAL0.
 	sdmmc_storage_set_mmc_partition(&emmc_storage, EMMC_GPP);
@@ -418,24 +307,23 @@ t210b01:;
 	nx_emmc_bis_end();
 	nx_emmc_gpt_free(&gpt);
 
-	// Clear BIS keys slots and reinstate SBK.
+	// Clear BIS keys slots.
 	hos_bis_keys_clear();
 
 	nx_emmc_cal0_t *cal0 = (nx_emmc_cal0_t *)cal0_buf;
 
-	// If successful, save BIS keys.
+	// Check keys validity.
 	if (memcmp(&cal0->magic, "CAL0", 4))
 	{
 		free(cal0_buf);
 		cal0_buf = NULL;
 
-		hos_eks_bis_clear();
+		// Clear EKS keys.
+		hos_eks_clear(KB_FIRMWARE_VERSION_MAX);
 
 		lv_label_set_text(lb_desc, "#FFDD00 CAL0 is corrupt or wrong keys!#\n");
 		goto out;
 	}
-	else
-		hos_eks_bis_save();
 
 	u32 hash[8];
 	se_calc_sha256_oneshot(hash, (u8 *)cal0 + 0x40, cal0->body_size);
@@ -502,6 +390,9 @@ t210b01:;
 	case PANEL_AUO_A055TAN01:
 		strcat(txt_buf, "AUO A055TAN01");
 		break;
+	case PANEL_SAM_AMS699VC01:
+		strcat(txt_buf, "Samsung AMS699VC01");
+		break;
 	default:
 		switch (cal0->lcd_vendor & 0xFF)
 		{
@@ -515,6 +406,9 @@ t210b01:;
 		case (PANEL_AUO_A062TAN01 & 0xFF):
 			strcat(txt_buf, "AUO ");
 			break;
+		case (PANEL_SAM_AMS699VC01 & 0xFF):
+			strcat(txt_buf, "Samsung ");
+			break;
 		}
 		strcat(txt_buf, "Unknown");
 		break;
@@ -526,7 +420,6 @@ t210b01:;
 	lv_label_set_text(lb_desc, txt_buf);
 
 out:
-	free(pkg1);
 	free(txt_buf);
 	sd_unmount();
 	sdmmc_storage_end(&emmc_storage);
@@ -558,12 +451,12 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 		"DRAM ID:\n"
 		"#FF8000 Burnt Fuses (ODM 7/6):#\n"
 		"ODM Fields (4, 6, 7):\n"
-		"Secure Boot key (SBK):\n"
-		"Device key (DK):\n"
+		"Secure Boot Key (SBK):\n"
+		"Device Key (DK):\n"
+		"Keygen Revision:\n"
 		"USB Stack:\n"
 		"Final Test Revision:\n"
 		"Chip Probing Revision:\n"
-		"Bootrom ipatches size:\n"
 		"CPU Speedo 0 (CPU Val):\n"
 		"CPU Speedo 1:\n"
 		"CPU Speedo 2 (GPU Val):\n"
@@ -585,11 +478,11 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	lv_obj_set_width(lb_desc, lv_obj_get_width(desc));
 
 	lv_obj_t *val = lv_cont_create(win, NULL);
-	lv_obj_set_size(val, LV_HOR_RES / 11 * 3, LV_VER_RES - (LV_DPI * 11 / 7) - 5);
+	lv_obj_set_size(val, LV_HOR_RES / 7 * 2 + LV_DPI / 11, LV_VER_RES - (LV_DPI * 11 / 7) - 5);
 
 	lv_obj_t * lb_val = lv_label_create(val, lb_desc);
 
-	char *txt_buf = (char *)malloc(0x4000);
+	char *txt_buf = (char *)malloc(SZ_16K);
 
 	// Decode fuses.
 	char *sku;
@@ -608,81 +501,101 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	case FUSE_NX_HW_TYPE_HOAG:
 		sku = "Hoag (Mariko)";
 		break;
+	case FUSE_NX_HW_TYPE_AULA:
+		sku = "Aula (Mariko)";
+		break;
 	default:
 		sku = "#FF8000 Unknown#";
 		break;
 	}
 
-	switch (dram_id)
+	if (!h_cfg.t210b01)
 	{
-	// LPDDR4 3200Mbps.
-	case LPDDR4_ICOSA_4GB_SAMSUNG_K4F6E304HB_MGCH:
-	case LPDDR4_COPPER_4GB_SAMSUNG_K4F6E304HB_MGCH:
-		strcpy(dram_man, "Samsung K4F6E304HB-MGCH 4GB");
-		break;
-	case LPDDR4_ICOSA_4GB_HYNIX_H9HCNNNBPUMLHR_NLE:
-	case LPDDR4_COPPER_4GB_HYNIX_H9HCNNNBPUMLHR_NLE:
-		strcpy(dram_man, "Hynix H9HCNNNBPUMLHR-NLE 4GB");
-		break;
-	case LPDDR4_ICOSA_4GB_MICRON_MT53B512M32D2NP_062_WT:
-	case LPDDR4_COPPER_4GB_MICRON_MT53B512M32D2NP_062_WT:
-		strcpy(dram_man, "Micron MT53B512M32D2NP-062");
-		break;
-	case LPDDR4_ICOSA_6GB_SAMSUNG_K4FHE3D4HM_MGCH:
-		strcpy(dram_man, "Samsung K4FHE3D4HM-MGCH 6GB");
-		break;
+		switch (dram_id)
+		{
+		// LPDDR4 3200Mbps.
+		case LPDDR4_ICOSA_4GB_SAMSUNG_K4F6E304HB_MGCH:
+		case LPDDR4_COPPER_4GB_SAMSUNG_K4F6E304HB_MGCH:
+			strcpy(dram_man, "Samsung K4F6E304HB-MGCH 4GB");
+			break;
+		case LPDDR4_ICOSA_4GB_HYNIX_H9HCNNNBPUMLHR_NLE:
+		case LPDDR4_COPPER_4GB_HYNIX_H9HCNNNBPUMLHR_NLE:
+			strcpy(dram_man, "Hynix H9HCNNNBPUMLHR-NLE 4GB");
+			break;
+		case LPDDR4_ICOSA_4GB_MICRON_MT53B512M32D2NP_062_WT:
+		case LPDDR4_COPPER_4GB_MICRON_MT53B512M32D2NP_062_WT:
+			strcpy(dram_man, "Micron MT53B512M32D2NP-062 WT:C");
+			break;
+		case LPDDR4_ICOSA_6GB_SAMSUNG_K4FHE3D4HM_MGCH:
+			strcpy(dram_man, "Samsung K4FHE3D4HM-MGCH 6GB");
+			break;
+		default:
+			strcpy(dram_man, "#FF8000 Unknown#");
+			break;
+		}
+	}
+	else
+	{
+		switch (dram_id)
+		{
+		// LPDDR4X 3733Mbps.
+		case LPDDR4X_IOWA_4GB_SAMSUNG_X1X2:
+			strcpy(dram_man, "Samsung X1X2 4GB");
+			break;
+		case LPDDR4X_IOWA_4GB_SAMSUNG_K4U6E3S4AM_MGCJ:
+		case LPDDR4X_HOAG_4GB_SAMSUNG_K4U6E3S4AM_MGCJ:
+			strcpy(dram_man, "Samsung K4U6E3S4AM-MGCJ 4GB");
+			break;
+		case LPDDR4X_IOWA_8GB_SAMSUNG_K4UBE3D4AM_MGCJ:
+		case LPDDR4X_HOAG_8GB_SAMSUNG_K4UBE3D4AM_MGCJ:
+			strcpy(dram_man, "Samsung K4UBE3D4AM-MGCJ 8GB");
+			break;
+		case LPDDR4X_IOWA_4GB_HYNIX_H9HCNNNBKMMLHR_NME:
+		case LPDDR4X_HOAG_4GB_HYNIX_H9HCNNNBKMMLHR_NME:
+			strcpy(dram_man, "Hynix H9HCNNNBKMMLHR-NME 4GB");
+			break;
+		case LPDDR4X_IOWA_4GB_MICRON_MT53E512M32D2NP_046_WTE: // 4266Mbps.
+		case LPDDR4X_HOAG_4GB_MICRON_MT53E512M32D2NP_046_WTE: // 4266Mbps.
+			strcpy(dram_man, "Micron MT53E512M32D2NP-046 WT:E");
+			break;
 
-	// LPDDR4X 3733Mbps.
-	case LPDDR4X_IOWA_4GB_SAMSUNG_X1X2:
-		strcpy(dram_man, "Samsung X1X2 4GB");
-		break;
-	case LPDDR4X_IOWA_4GB_SAMSUNG_K4U6E3S4AM_MGCJ:
-	case LPDDR4X_HOAG_4GB_SAMSUNG_K4U6E3S4AM_MGCJ:
-		strcpy(dram_man, "Samsung K4U6E3S4AM-MGCJ 4GB");
-		break;
-	case LPDDR4X_IOWA_8GB_SAMSUNG_K4UBE3D4AM_MGCJ:
-	case LPDDR4X_HOAG_8GB_SAMSUNG_K4UBE3D4AM_MGCJ:
-		strcpy(dram_man, "Samsung K4UBE3D4AM-MGCJ 8GB");
-		break;
-	case LPDDR4X_IOWA_4GB_HYNIX_H9HCNNNBKMMLHR_NME:
-	case LPDDR4X_HOAG_4GB_HYNIX_H9HCNNNBKMMLHR_NME:
-		strcpy(dram_man, "Hynix H9HCNNNBKMMLHR-NME 4GB");
-		break;
-
-	case LPDDR4X_IOWA_4GB_MICRON_MT53E512M32D2NP_046_WT: // 4266Mbps.
-	case LPDDR4X_HOAG_4GB_MICRON_MT53E512M32D2NP_046_WT: // 4266Mbps.
-		strcpy(dram_man, "Micron MT53E512M32D2NP-046 4GB");
-		break;
-	// LPDDR4X 4266Mbps?
-	case LPDDR4X_IOWA_4GB_SAMSUNG_Y:
-		strcpy(dram_man, "Samsung Y 4GB");
-		break;
-	case LPDDR4X_IOWA_4GB_SAMSUNG_1Y_X:
-	case LPDDR4X_HOAG_4GB_SAMSUNG_1Y_X:
-	case LPDDR4X_AULA_4GB_SAMSUNG_1Y_X:
-		strcpy(dram_man, "Samsung 1y X 4GB");
-		break;
-	case LPDDR4X_IOWA_8GB_SAMSUNG_1Y_X:
-	case LPDDR4X_AULA_8GB_SAMSUNG_1Y_X:
-		strcpy(dram_man, "Samsung 1y X 8GB");
-		break;
-	case LPDDR4X_IOWA_4GB_SAMSUNG_1Y_Y:
-		strcpy(dram_man, "Samsung 1y Y 4GB");
-		break;
-	case LPDDR4X_IOWA_8GB_SAMSUNG_1Y_Y:
-		strcpy(dram_man, "Samsung 1y Y 8GB");
-		break;
-	case LPDDR4X_AULA_4GB_SAMSUNG_1Y_A:
-		strcpy(dram_man, "Samsung 1y A 4GB");
-		break;
-	case LPDDR4X_IOWA_4GB_MICRON_1Y_A:
-	case LPDDR4X_HOAG_4GB_MICRON_1Y_A:
-	case LPDDR4X_AULA_4GB_MICRON_1Y_A:
-		strcpy(dram_man, "Micron 1y A 4GB");
-		break;
-	default:
-		strcpy(dram_man, "#FF8000 Unknown#");
-		break;
+		// LPDDR4X 4266Mbps
+		case LPDDR4X_IOWA_4GB_SAMSUNG_Y:
+			strcpy(dram_man, "Samsung Y 4GB");
+			break;
+		case LPDDR4X_IOWA_4GB_SAMSUNG_K4U6E3S4AA_MGCL:
+		case LPDDR4X_HOAG_4GB_SAMSUNG_K4U6E3S4AA_MGCL:
+		case LPDDR4X_AULA_4GB_SAMSUNG_K4U6E3S4AA_MGCL:
+			strcpy(dram_man, "Samsung K4U6E3S4AA-MGCL 4GB");
+			break;
+		case LPDDR4X_IOWA_8GB_SAMSUNG_K4UBE3D4AA_MGCL:
+		case LPDDR4X_HOAG_8GB_SAMSUNG_K4UBE3D4AA_MGCL:
+		case LPDDR4X_AULA_8GB_SAMSUNG_K4UBE3D4AA_MGCL:
+			strcpy(dram_man, "Samsung K4UBE3D4AA-MGCL 8GB");
+			break;
+		case LPDDR4X_IOWA_4GB_SAMSUNG_1Y_Y:
+			strcpy(dram_man, "Samsung 1y Y 4GB");
+			break;
+		case LPDDR4X_IOWA_8GB_SAMSUNG_1Y_Y:
+			strcpy(dram_man, "Samsung 1y Y 8GB");
+			break;
+		// case LPDDR4X_AULA_8GB_SAMSUNG_1Y_A: // Unused.
+		// 	strcpy(dram_man, "Samsung 1y A 4GB");
+		// 	break;
+		case LPDDR4X_IOWA_4GB_MICRON_MT53E512M32D2NP_046_WTF:
+		case LPDDR4X_HOAG_4GB_MICRON_MT53E512M32D2NP_046_WTF:
+		case LPDDR4X_AULA_4GB_MICRON_MT53E512M32D2NP_046_WTF:
+			strcpy(dram_man, "Micron MT53E512M32D2NP-046 WT:F");
+			break;
+		case LPDDR4X_IOWA_4GB_HYNIX_1Y_A: // Replaced from Copper.
+		case LPDDR4X_HOAG_4GB_HYNIX_1Y_A: // Replaced from Copper.
+		case LPDDR4X_AULA_4GB_HYNIX_1Y_A: // Replaced from Copper.
+			strcpy(dram_man, "Hynix 1y A 4GB");
+			break;
+		default:
+			strcpy(dram_man, "#FF8000 Unknown#");
+			break;
+		}
 	}
 
 	// Count burnt fuses.
@@ -764,20 +677,19 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	u32 chip_id = APB_MISC(APB_MISC_GP_HIDREV);
 	// Parse fuses and display them.
 	s_printf(txt_buf,
-		"%X - %s - %s\n%02d: %s\n%d - %d (HOS: %s)\n%08X %08X %08X\n%08X%08X%08X%08X\n%08X\n"
-		"%s\n%d.%02d (0x%X)\n%d.%02d (0x%X)\n%d\n%d\n%d\n%d\n%d\n0x%X\n%d\n%d\n%d\n%d\n"
+		"%X - %s - %s\n%02d: %s\n%d - %d (HOS: %s)\n%08X %08X %08X\n%08X%08X%08X%08X\n%08X\n%d\n"
+		"%s\n%d.%02d (0x%X)\n%d.%02d (0x%X)\n%d\n%d\n%d\n%d\n0x%X\n%d\n%d\n%d\n%d\n"
 		"%d\n%d\n%d (0x%X)\n%d\n%d\n%d\n%d\n"
-		"ID: %02X, Major: A0%d, Minor: %d",
+		"ID: %02X, Major: A%02d, Minor: %d",
 		FUSE(FUSE_SKU_INFO), sku, fuse_read_hw_state() ? "Dev" : "Retail",
 		dram_id, dram_man, burnt_fuses_7, burnt_fuses_6, fuses_hos_version,
 		fuse_read_odm(4), fuse_read_odm(6), fuse_read_odm(7),
 		byte_swap_32(FUSE(FUSE_PRIVATE_KEY0)), byte_swap_32(FUSE(FUSE_PRIVATE_KEY1)),
 		byte_swap_32(FUSE(FUSE_PRIVATE_KEY2)), byte_swap_32(FUSE(FUSE_PRIVATE_KEY3)),
-		byte_swap_32(FUSE(FUSE_PRIVATE_KEY4)),
+		byte_swap_32(FUSE(FUSE_PRIVATE_KEY4)), fuse_read_odm_keygen_rev(),
 		((FUSE(FUSE_RESERVED_SW) & 0x80) || h_cfg.t210b01) ? "XUSB" : "USB2",
 		(FUSE(FUSE_OPT_FT_REV)  >> 5) & 0x3F, FUSE(FUSE_OPT_FT_REV) & 0x1F, FUSE(FUSE_OPT_FT_REV),
 		(FUSE(FUSE_OPT_CP_REV)  >> 5) & 0x3F, FUSE(FUSE_OPT_CP_REV) & 0x1F, FUSE(FUSE_OPT_CP_REV),
-		FUSE(FUSE_FIRST_BOOTROM_PATCH_SIZE) & 0x7F,
 		FUSE(FUSE_CPU_SPEEDO_0_CALIB), FUSE(FUSE_CPU_SPEEDO_1_CALIB), FUSE(FUSE_CPU_SPEEDO_2_CALIB),
 		FUSE(FUSE_SOC_SPEEDO_0_CALIB), FUSE(FUSE_SOC_SPEEDO_1_CALIB), FUSE(FUSE_SOC_SPEEDO_2_CALIB),
 		FUSE(FUSE_CPU_IDDQ_CALIB), FUSE(FUSE_SOC_IDDQ_CALIB), FUSE(FUSE_GPU_IDDQ_CALIB),
@@ -805,15 +717,43 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	u32 ranks = EMC(EMC_ADR_CFG) + 1;
 	u32 channels = (EMC(EMC_FBIO_CFG7) >> 1) & 3;
 	u32 die_channels = ranks * ((channels & 1) + ((channels & 2) >> 1));
-	s_printf(txt_buf, "#00DDFF %s SDRAM ##FF8000 (Ch 0 | Ch 1):#\n#FF8000 Vendor:# ", dram_id > 6 ? "LPDDR4X" : "LPDDR4");
+	s_printf(txt_buf, "#00DDFF %s SDRAM ##FF8000 (Ch 0 | Ch 1):#\n#FF8000 Vendor:# ", h_cfg.t210b01 ? "LPDDR4X" : "LPDDR4");
 	switch (ram_vendor.rank0_ch0)
 	{
 	case 1:
 		strcat(txt_buf, "Samsung");
 		break;
+/*
+	case 5:
+		strcat(txt_buf, "Nanya");
+		break;
+*/
 	case 6:
 		strcat(txt_buf, "Hynix");
 		break;
+/*
+	case 8:
+		strcat(txt_buf, "Winbond");
+		break;
+	case 9:
+		strcat(txt_buf, "ESMT");
+		break;
+	case 26:
+		strcat(txt_buf, "Xi'an UniIC Semiconductors Co., Ltd");
+		break;
+	case 28:
+		strcat(txt_buf, "JSC");
+		break;
+	case 248:
+		strcat(txt_buf, "Fidelix");
+		break;
+	case 249:
+		strcat(txt_buf, "Ultra Memory");
+		break;
+	case 253:
+		strcat(txt_buf, "AP Memory");
+		break;
+ */
 	case 255:
 		strcat(txt_buf, "Micron");
 		break;
@@ -850,6 +790,12 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	case 4:
 		strcat(txt_buf, " x 1GB");
 		break;
+	case 5:
+		strcat(txt_buf, " x 1.5GB");
+		break;
+	case 6:
+		strcat(txt_buf, " x 2GB");
+		break;
 	default:
 		s_printf(txt_buf + strlen(txt_buf), " x Unk (%d)", (ram_density.rank0_ch0 & 0x3C) >> 2);
 		break;
@@ -865,6 +811,12 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 		break;
 	case 4:
 		strcat(txt_buf, " x 1GB");
+		break;
+	case 5:
+		strcat(txt_buf, " x 1.5GB");
+		break;
+	case 6:
+		strcat(txt_buf, " x 2GB");
 		break;
 	default:
 		s_printf(txt_buf + strlen(txt_buf), " x Unk (%d)", (ram_density.rank0_ch1 & 0x3C) >> 2);
@@ -928,6 +880,9 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	case PANEL_AUO_A055TAN01:
 		strcat(txt_buf, "AUO A055TAN01");
 		break;
+	case PANEL_SAM_AMS699VC01:
+		strcat(txt_buf, "Samsung AMS699VC01");
+		break;
 	default:
 		switch (display_id & 0xFF)
 		{
@@ -939,6 +894,9 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 			break;
 		case (PANEL_AUO_A062TAN01 & 0xFF):
 			strcat(txt_buf, "AUO ");
+			break;
+		case (PANEL_SAM_AMS699VC01 & 0xFF):
+			strcat(txt_buf, "Samsung ");
 			break;
 		}
 		strcat(txt_buf, "Unknown #FFDD00 Contact me!#");
@@ -959,7 +917,7 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 		touch_panel = touch_get_panel_vendor();
 		if (touch_panel)
 		{
-			if (touch_panel->idx == -2) // Touch panel not found, print gpios.
+			if ((u8)touch_panel->idx == (u8)-2) // Touch panel not found, print gpios.
 			{
 				s_printf(txt_buf + strlen(txt_buf), "%2X%2X%2X #FFDD00 Contact me!#",
 					touch_panel->gpio0, touch_panel->gpio1, touch_panel->gpio2);
@@ -976,41 +934,48 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 		switch (touch_fw.fw_id)
 		{
 		case 0x00100100:
-			strcat(txt_buf, "4CD 1601");
+			strcat(txt_buf, "4CD60D/0");
 			if (touch_panel)
-				panel_ic_paired = touch_panel->idx == -1;
+				panel_ic_paired = (u8)touch_panel->idx == (u8)-1;
 			break;
 		case 0x00100200: // 4CD 1602.
 		case 0x00120100:
 		case 0x32000001:
-			strcat(txt_buf, "4CD 1801");
+			strcat(txt_buf, "4CD60D/1");
 			if (touch_panel)
 				panel_ic_paired = touch_panel->idx == 0; // NISSHA NFT-K12D.
 			break;
+		case 0x98000004: // New 6.2" panel?
+		case 0x50000001:
+			strcat(txt_buf, "FST2 UNK");
+			if (touch_panel)
+				panel_ic_paired = touch_panel->idx == 0;
+			break;
 		case 0x001A0300:
 		case 0x32000102:
-			strcat(txt_buf, "4CD 2602");
+			strcat(txt_buf, "4CD60D/2");
 			if (touch_panel)
 				panel_ic_paired = touch_panel->idx == 1; // GiS GGM6 B2X.
 			break;
 		case 0x00290100:
 		case 0x32000302:
-			strcat(txt_buf, "4CD 3801");
+			strcat(txt_buf, "4CD60D/3");
 			if (touch_panel)
 				panel_ic_paired = touch_panel->idx == 2; // NISSHA NBF-K9A.
 			break;
 		case 0x31051820:
 		case 0x32000402:
-			strcat(txt_buf, "4CD 4602"); // Assumed. Official is XXXX.
+			strcat(txt_buf, "4CD60D/4");
 			if (touch_panel)
 				panel_ic_paired = touch_panel->idx == 3; // GiS 5.5".
 			break;
 		case 0x32000501:
 		case 0x33000502:
 		case 0x33000503:
-			strcat(txt_buf, "4CD UNKN");
+		case 0x33000510:
+			strcat(txt_buf, "4CD60D/5");
 			if (touch_panel)
-				panel_ic_paired = touch_panel->idx == 4; // Unknown Aula 6.2".
+				panel_ic_paired = touch_panel->idx == 4; // Samsung BH2109.
 			break;
 		default:
 			strcat(txt_buf, "#FF8000 Unknown#");
@@ -1018,7 +983,9 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 		}
 
 		s_printf(txt_buf + strlen(txt_buf), " - %s)\n#FF8000 FTB ver:# %04X\n#FF8000 FW rev:# %04X",
-			panel_ic_paired ? "Paired" : "#FFDD00 Error#", touch_fw.ftb_ver, touch_fw.fw_rev);
+			panel_ic_paired ? "Paired" : "#FFDD00 Error#",
+			touch_fw.ftb_ver,
+			byte_swap_16(touch_fw.fw_rev)); // Byte swapping makes more sense here.
 	}
 	else
 		strcat(txt_buf, "\n\n#FFDD00 Failed to get touch info!#");
@@ -1034,17 +1001,12 @@ static lv_res_t _create_window_fuses_info_status(lv_obj_t *btn)
 	free(txt_buf);
 
 	lv_obj_set_width(lb_desc2, lv_obj_get_width(desc2));
-	lv_obj_align(desc2, val, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 2, 0);
+	lv_obj_align(desc2, val, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 4, 0);
 
 	if (!btn)
 		_create_mbox_cal0(NULL);
 
 	return LV_RES_OK;
-}
-
-void sept_run_cal0(void *param)
-{
-	_create_window_fuses_info_status(NULL);
 }
 
 static char *ipatches_txt;
@@ -1077,7 +1039,7 @@ static lv_res_t _create_window_bootrom_info_status(lv_obj_t *btn)
 	lv_label_set_recolor(lb_desc, true);
 	lv_label_set_style(lb_desc, &monospace_text);
 
-	char *txt_buf = (char *)malloc(0x1000);
+	char *txt_buf = (char *)malloc(SZ_4K);
 	ipatches_txt = txt_buf;
 	s_printf(txt_buf, "#00DDFF Ipatches:#\n#FF8000 Address  "SYMBOL_DOT"  Val  "SYMBOL_DOT"  Instruction#\n");
 
@@ -1094,148 +1056,44 @@ static lv_res_t _create_window_bootrom_info_status(lv_obj_t *btn)
 	return LV_RES_OK;
 }
 
-static lv_res_t _create_window_tsec_keys_status(lv_obj_t *btn)
+static lv_res_t _launch_lockpick_action(lv_obj_t *btns, const char * txt)
 {
-	u32 retries = 0;
+	int btn_idx = lv_btnm_get_pressed(btns);
 
-	tsec_ctxt_t tsec_ctxt;
+	mbox_action(btns, txt);
 
-	lv_obj_t *win = nyx_create_standard_window(SYMBOL_CHIP" TSEC Keys");
-
-	//Disable buttons.
-	nyx_window_toggle_buttons(win, true);
-
-	lv_obj_t *desc = lv_cont_create(win, NULL);
-	lv_obj_set_size(desc, LV_HOR_RES / 2 / 2, LV_VER_RES - (LV_DPI * 11 / 6));
-	//lv_obj_align(desc, win, LV_ALIGN_ou_TOP_LEFT, 0, 40);
-
-	lv_obj_t * lb_desc = lv_label_create(desc, NULL);
-	lv_label_set_long_mode(lb_desc, LV_LABEL_LONG_BREAK);
-	lv_label_set_recolor(lb_desc, true);
-	lv_label_set_style(lb_desc, &monospace_text);
-
-	char *txt_buf  = (char *)malloc(0x1000);
-	char *txt_buf2 = (char *)malloc(0x1000);
-	txt_buf[0] = 0;
-
-	// Read package1.
-	static const u32 BOOTLOADER_SIZE          = 0x40000;
-	static const u32 BOOTLOADER_MAIN_OFFSET   = 0x100000;
-	static const u32 BOOTLOADER_BACKUP_OFFSET = 0x140000;
-
-	u8 *pkg1 = (u8 *)malloc(0x40000);
-	u32 bootloader_offset = BOOTLOADER_MAIN_OFFSET;
-
-try_load:
-	sdmmc_storage_init_mmc(&emmc_storage, &emmc_sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400);
-	sdmmc_storage_set_mmc_partition(&emmc_storage, EMMC_BOOT0);
-	sdmmc_storage_read(&emmc_storage, bootloader_offset / NX_EMMC_BLOCKSIZE, BOOTLOADER_SIZE / NX_EMMC_BLOCKSIZE, pkg1);
-	sdmmc_storage_end(&emmc_storage);
-
-	char *build_date = malloc(32);
-	const pkg1_id_t *pkg1_id = pkg1_identify(pkg1, build_date);
-
-	s_printf(txt_buf + strlen(txt_buf), "#00DDFF Found pkg1 ('%s')#\n", build_date);
-	free(build_date);
-
-	if (!pkg1_id)
+	if (btn_idx == 1)
 	{
-		strcat(txt_buf, "#FFDD00 Unknown pkg1 version!#\n");
-		// Try backup bootloader.
-		if (bootloader_offset != BOOTLOADER_BACKUP_OFFSET)
-		{
-			strcat(txt_buf, "Trying backup bootloader...\n");
-			bootloader_offset = BOOTLOADER_BACKUP_OFFSET;
-			goto try_load;
-		}
-		lv_label_set_text(lb_desc, txt_buf);
-		lv_obj_set_width(lb_desc, lv_obj_get_width(desc));
-
-		goto out;
-	}
-	lv_label_set_text(lb_desc, txt_buf);
-	lv_obj_set_width(lb_desc, lv_obj_get_width(desc));
-
-	lv_obj_t *val = lv_cont_create(win, NULL);
-	lv_obj_set_size(val, LV_HOR_RES / 11 * 3, LV_VER_RES - (LV_DPI * 11 / 6));
-
-	lv_obj_t * lb_val = lv_label_create(val, lb_desc);
-	lv_label_set_style(lb_val, &monospace_text);
-
-	lv_label_set_text(lb_val, "Please wait...");
-	lv_obj_set_width(lb_val, lv_obj_get_width(val));
-	lv_obj_align(val, desc, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
-	manual_system_maintenance(true);
-
-	tsec_ctxt.fw = (u8 *)pkg1 + pkg1_id->tsec_off;
-	tsec_ctxt.pkg1 = pkg1;
-	tsec_ctxt.pkg11_off = pkg1_id->pkg11_off;
-	tsec_ctxt.secmon_base = pkg1_id->secmon_base;
-
-	if (pkg1_id->kb <= KB_FIRMWARE_VERSION_600)
-		tsec_ctxt.size = 0xF00;
-	else if (pkg1_id->kb == KB_FIRMWARE_VERSION_620)
-		tsec_ctxt.size = 0x2900;
-	else if (pkg1_id->kb == KB_FIRMWARE_VERSION_700)
-	{
-		tsec_ctxt.size = 0x3000;
-		// Exit after TSEC key generation.
-		*((vu16 *)((u32)tsec_ctxt.fw + 0x2DB5)) = 0x02F8;
-	}
-	else
-		tsec_ctxt.size = 0x3300;
-
-	if (pkg1_id->kb == KB_FIRMWARE_VERSION_620)
-	{
-		u8 *tsec_paged = (u8 *)page_alloc(3);
-		memcpy(tsec_paged, (void *)tsec_ctxt.fw, tsec_ctxt.size);
-		tsec_ctxt.fw = tsec_paged;
+		lv_obj_t *list = lv_list_create(NULL, NULL);
+		lv_obj_set_size(list, 1, 1);
+		lv_list_set_single_mode(list, true);
+		lv_list_add(list, NULL, "Lockpick_RCM.bin", NULL);
+		lv_obj_t *btn;
+		btn = lv_list_get_prev_btn(list, NULL);
+		launch_payload(btn);
+		lv_obj_del(list);
 	}
 
-	int res = 0;
+	return LV_RES_INV;
+}
 
-	while (tsec_query((u8 *)tsec_keys, pkg1_id->kb, &tsec_ctxt) < 0)
-	{
-		memset(tsec_keys, 0x00, 0x20);
+static lv_res_t _create_mbox_lockpick(lv_obj_t *btn)
+{
+	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
+	lv_obj_set_style(dark_bg, &mbox_darken);
+	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
-		retries++;
+	static const char * mbox_btn_map[] = { "\211", "\222Continue", "\222Close", "\211", "" };
+	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
+	lv_mbox_set_recolor_text(mbox, true);
 
-		if (retries > 3)
-		{
-			res = -1;
-			break;
-		}
-	}
+	lv_mbox_set_text(mbox, "#FF8000 Lockpick RCM#\n\nThis will launch Lockpick RCM.\nDo you want to continue?\n\n"
+		"To return back from lockpick use\n#96FF00 Reboot to hekate#.");
 
-	strcat(txt_buf, "#C7EA46 TSEC Key:#\n");
-	if (res >= 0)
-	{
-		s_printf(txt_buf2, "\n%08X%08X%08X%08X\n",
-			byte_swap_32(tsec_keys[0]), byte_swap_32(tsec_keys[1]), byte_swap_32(tsec_keys[2]), byte_swap_32(tsec_keys[3]));
-
-		if (pkg1_id->kb == KB_FIRMWARE_VERSION_620)
-		{
-			strcat(txt_buf, "#C7EA46 TSEC root:#\n");
-			s_printf(txt_buf2 + strlen(txt_buf2), "%08X%08X%08X%08X\n",
-				byte_swap_32(tsec_keys[4]), byte_swap_32(tsec_keys[5]), byte_swap_32(tsec_keys[6]), byte_swap_32(tsec_keys[7]));
-		}
-		lv_win_add_btn(win, NULL, SYMBOL_DOWNLOAD" Dump Keys", _tsec_keys_dump_window_action);
-	}
-	else
-	{
-		s_printf(txt_buf2, "Error: %x", res);
-	}
-
-	lv_label_set_text(lb_desc, txt_buf);
-
-	lv_label_set_text(lb_val, txt_buf2);
-
-out:
-	free(pkg1);
-	free(txt_buf);
-	free(txt_buf2);
-
-	nyx_window_toggle_buttons(win, false);
+	lv_mbox_add_btns(mbox, mbox_btn_map, _launch_lockpick_action);
+	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 5);
+	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+	lv_obj_set_top(mbox, true);
 
 	return LV_RES_OK;
 }
@@ -1260,8 +1118,8 @@ static lv_res_t _create_mbox_emmc_sandisk_report(lv_obj_t * btn)
 	lv_mbox_set_text(mbox, "#C7EA46 Sandisk Device Report#");
 
 	u8 *buf = calloc(512, 1);
-	char *txt_buf = (char *)malloc(0x8000);
-	char *txt_buf2 = (char *)malloc(0x8000);
+	char *txt_buf = (char *)malloc(SZ_32K);
+	char *txt_buf2 = (char *)malloc(SZ_32K);
 	txt_buf[0] = 0;
 	txt_buf2[0] = 0;
 
@@ -1444,7 +1302,7 @@ static lv_res_t _create_mbox_benchmark(bool sd_bench)
 	lv_mbox_set_recolor_text(mbox, true);
 	lv_obj_set_width(mbox, LV_HOR_RES / 7 * 4);
 
-	char *txt_buf = (char *)malloc(0x4000);
+	char *txt_buf = (char *)malloc(SZ_16K);
 
 	s_printf(txt_buf, "#FF8000 %s Benchmark#\n[Raw Reads] Abort: VOL- & VOL+",
 		sd_bench ? "SD Card" : "eMMC");
@@ -1713,7 +1571,7 @@ static lv_res_t _create_window_emmc_info_status(lv_obj_t *btn)
 	lv_label_set_long_mode(lb_desc, LV_LABEL_LONG_BREAK);
 	lv_label_set_recolor(lb_desc, true);
 
-	char *txt_buf = (char *)malloc(0x4000);
+	char *txt_buf = (char *)malloc(SZ_16K);
 	txt_buf[0] = '\n';
 	txt_buf[1] = 0;
 
@@ -1959,13 +1817,16 @@ static lv_res_t _create_window_sdcard_info_status(lv_obj_t *btn)
 
 		lv_obj_t * lb_val = lv_label_create(val, lb_desc);
 
-		char *txt_buf = (char *)malloc(0x4000);
+		char *txt_buf = (char *)malloc(SZ_16K);
 		txt_buf[0] = '\n';
 		txt_buf[1] = 0;
 
 		// Identify manufacturer.
 		switch (sd_storage.cid.manfid)
 		{
+		case 0x00:
+			strcat(txt_buf, "Fake ");
+			break;
 		case 0x01:
 			strcat(txt_buf, "Panasonic ");
 			break;
@@ -1974,6 +1835,21 @@ static lv_res_t _create_window_sdcard_info_status(lv_obj_t *btn)
 			break;
 		case 0x03:
 			strcat(txt_buf, "SanDisk ");
+			break;
+		case 0x06:
+			strcat(txt_buf, "Ritek ");
+			break;
+		case 0x09:
+			strcat(txt_buf, "ATP ");
+			break;
+		case 0x13:
+			strcat(txt_buf, "Kingmax ");
+			break;
+		case 0x19:
+			strcat(txt_buf, "Dynacard ");
+			break;
+		case 0x1A:
+			strcat(txt_buf, "Power Quotient ");
 			break;
 		case 0x1B:
 			strcat(txt_buf, "Samsung ");
@@ -1985,7 +1861,7 @@ static lv_res_t _create_window_sdcard_info_status(lv_obj_t *btn)
 			strcat(txt_buf, "Phison ");
 			break;
 		case 0x28:
-			strcat(txt_buf, "Lexar ");
+			strcat(txt_buf, "Barun Electronics ");
 			break;
 		case 0x31:
 			strcat(txt_buf, "Silicon Power ");
@@ -1993,20 +1869,47 @@ static lv_res_t _create_window_sdcard_info_status(lv_obj_t *btn)
 		case 0x41:
 			strcat(txt_buf, "Kingston ");
 			break;
+		case 0x51:
+			strcat(txt_buf, "STEC ");
+			break;
+		case 0x5D:
+			strcat(txt_buf, "SwissBit ");
+			break;
+		case 0x61:
+			strcat(txt_buf, "Netlist ");
+			break;
+		case 0x63:
+			strcat(txt_buf, "Cactus ");
+			break;
+		case 0x73:
+			strcat(txt_buf, "Bongiovi ");
+			break;
 		case 0x74:
-			strcat(txt_buf, "Transcend ");
+			strcat(txt_buf, "Jiaelec ");
 			break;
 		case 0x76:
 			strcat(txt_buf, "Patriot ");
 			break;
 		case 0x82:
-			strcat(txt_buf, "Sony ");
+			strcat(txt_buf, "Jiang Tay ");
+			break;
+		case 0x83:
+			strcat(txt_buf, "Netcom ");
+			break;
+		case 0x84:
+			strcat(txt_buf, "Strontium ");
 			break;
 		//TODO: Investigate which OEM/ODM makes these.
-		// case 0x9C: // LX512 SO
-		// case 0xAD: // LX512 LS
-		// 	strcat(txt_buf, "Lexar ");
-		// 	break;
+		case 0x9C: // BE, Angelbird | Barun Electronics? What about 0x28?
+				   // LX512 SO, Lexar, Angelbird, Hoodman, Sony | Solidgear?
+			strcat(txt_buf, "Solidgear ");
+			break;
+		case 0x9F:
+			strcat(txt_buf, "Taishin ");
+			break;
+		case 0xAD: // Lexar LX512 LS. Longsys?
+			strcat(txt_buf, "Longsys ");
+			break;
 		default:
 			strcat(txt_buf, "Unknown ");
 			break;
@@ -2227,7 +2130,7 @@ static lv_res_t _create_window_battery_status(lv_obj_t *btn)
 
 	lv_obj_t * lb_val = lv_label_create(val, lb_desc);
 
-	char *txt_buf = (char *)malloc(0x4000);
+	char *txt_buf = (char *)malloc(SZ_16K);
 	int value = 0;
 	int cap_pct = 0;
 
@@ -2294,11 +2197,11 @@ static lv_res_t _create_window_battery_status(lv_obj_t *btn)
 			i2c_recv_byte(I2C_5, MAX77621_CPU_I2C_ADDR, MAX77621_CHIPID1_REG));
 		break;
 	case 1:
-		s_printf(txt_buf + strlen(txt_buf), "max77812-2 v%d",
+		s_printf(txt_buf + strlen(txt_buf), "max77812-2 v%d", // High power. 2 Outputs, phases 3 1.
 			i2c_recv_byte(I2C_5, MAX77812_PHASE31_CPU_I2C_ADDR, MAX77812_REG_VERSION) & 7);
 		break;
 	case 2:
-		s_printf(txt_buf + strlen(txt_buf), "max77812-3 v%d.0",
+		s_printf(txt_buf + strlen(txt_buf), "max77812-3 v%d.0", // Low power. 3 Outputs, phases 2 1 1.
 			i2c_recv_byte(I2C_5, MAX77812_PHASE211_CPU_I2C_ADDR, MAX77812_REG_VERSION) & 7);
 		break;
 	}
@@ -2433,6 +2336,45 @@ static lv_res_t _create_window_battery_status(lv_obj_t *btn)
 	return LV_RES_OK;
 }
 
+static bool _lockpick_exists_check()
+{
+	#define LOCKPICK_MAGIC_OFFSET   0x118
+	#define LOCKPICK_VERSION_OFFSET 0x11C
+	#define LOCKPICK_MAGIC          0x4B434F4C // LOCK.
+	#define LOCKPICK_MIN_VERSION    0x1090500  // 1.9.5.
+
+	bool found = false;
+	void *buf = malloc(0x200);
+	if (sd_mount())
+	{
+		FIL fp;
+		if (f_open(&fp, "bootloader/payloads/Lockpick_RCM.bin", FA_READ))
+			goto out;
+
+		// Read Lockpick payload and check versioning.
+		if (f_read(&fp, buf, 0x200, NULL))
+		{
+			f_close(&fp);
+
+			goto out;
+		}
+
+		u32 magic = *(u32 *)(buf + LOCKPICK_MAGIC_OFFSET);
+		u32 version = byte_swap_32(*(u32 *)(buf + LOCKPICK_VERSION_OFFSET) - 0x303030);
+
+		if (magic == LOCKPICK_MAGIC && version >= LOCKPICK_MIN_VERSION)
+			found = true;
+
+		f_close(&fp);
+	}
+
+out:
+	free(buf);
+	sd_unmount();
+
+	return found;
+}
+
 void create_tab_info(lv_theme_t *th, lv_obj_t *parent)
 {
 	lv_page_set_scrl_layout(parent, LV_LAYOUT_PRETTY);
@@ -2481,17 +2423,30 @@ void create_tab_info(lv_theme_t *th, lv_obj_t *parent)
 	// Create TSEC Keys button.
 	lv_obj_t *btn2 = lv_btn_create(h1, btn);
 	label_btn = lv_label_create(btn2, NULL);
-	lv_label_set_static_text(label_btn, SYMBOL_KEY"  TSEC Keys");
-	lv_obj_align(btn2, btn, LV_ALIGN_OUT_RIGHT_TOP, LV_DPI * 4 / 9, 0);
-	lv_btn_set_action(btn2, LV_BTN_ACTION_CLICK, _create_window_tsec_keys_status);
-	if (h_cfg.t210b01)
+	lv_label_set_static_text(label_btn, SYMBOL_KEY"  Lockpick");
+	lv_obj_align(btn2, btn, LV_ALIGN_OUT_RIGHT_TOP, LV_DPI * 11 / 15, 0);
+	lv_btn_set_action(btn2, LV_BTN_ACTION_CLICK, _create_mbox_lockpick);
+
+	bool lockpick_found = _lockpick_exists_check();
+	if (!lockpick_found)
 		lv_btn_set_state(btn2, LV_BTN_STATE_INA);
 
 	lv_obj_t *label_txt2 = lv_label_create(h1, NULL);
 	lv_label_set_recolor(label_txt2, true);
-	lv_label_set_static_text(label_txt2,
-		"View Ipatches and dump the unpatched and patched versions\nof BootROM.\n"
-		"Or view and dump the device's TSEC Keys.\n");
+
+	if (lockpick_found)
+	{
+		lv_label_set_static_text(label_txt2,
+			"View Ipatches and dump the unpatched and patched versions\nof BootROM.\n"
+			"Or dump every single key via #C7EA46 Lockpick RCM#.\n");
+	}
+	else
+	{
+		lv_label_set_static_text(label_txt2,
+			"View Ipatches and dump the unpatched and patched versions\nof BootROM. Or dump every single key via #C7EA46 Lockpick RCM#.\n"
+			"#FFDD00 bootloader/payloads/Lockpick_RCM.bin is missing or old!#\n");
+	}
+
 	lv_obj_set_style(label_txt2, &hint_small_style);
 	lv_obj_align(label_txt2, btn, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 3);
 

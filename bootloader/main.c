@@ -28,7 +28,6 @@
 #include "gfx/tui.h"
 #include "hos/hos.h"
 #include "hos/secmon_exo.h"
-#include "hos/sept.h"
 #include <ianos/ianos.h>
 #include <libs/compr/blz.h>
 #include <libs/fatfs/ff.h>
@@ -108,6 +107,15 @@ void emmcsn_path_impl(char *path, char *sub_dir, char *filename, sdmmc_storage_t
 		sdmmc_storage_end(&emmc_storage);
 }
 
+void render_default_bootlogo()
+{
+	gfx_clear_grey(0x1B);
+	u8 *BOOTLOGO = (void *)malloc(SZ_16K);
+	blz_uncompress_srcdest(BOOTLOGO_BLZ, SZ_BOOTLOGO_BLZ, BOOTLOGO, SZ_BOOTLOGO);
+	gfx_set_rect_grey(BOOTLOGO, X_BOOTLOGO, Y_BOOTLOGO, 326, 544);
+	free(BOOTLOGO);
+}
+
 void check_power_off_from_hos()
 {
 	// Power off on AutoRCM wakeup from HOS shutdown. For modchips/dongles.
@@ -121,10 +129,7 @@ void check_power_off_from_hos()
 
 		if (h_cfg.autohosoff == 1)
 		{
-			gfx_clear_grey(0x1B);
-			u8 *BOOTLOGO = (void *)malloc(0x4000);
-			blz_uncompress_srcdest(BOOTLOGO_BLZ, SZ_BOOTLOGO_BLZ, BOOTLOGO, SZ_BOOTLOGO);
-			gfx_set_rect_grey(BOOTLOGO, X_BOOTLOGO, Y_BOOTLOGO, 326, 544);
+			render_default_bootlogo();
 
 			display_backlight_brightness(10, 5000);
 			display_backlight_brightness(100, 25000);
@@ -288,6 +293,7 @@ int launch_payload(char *path, bool update, bool clear_screen)
 			(*ext_payload_ptr)();
 		else
 		{
+			// Set updated flag to skip check on launch.
 			EMC(EMC_SCRATCH0) |= EMC_HEKA_UPD;
 			(*update_ptr)();
 		}
@@ -302,6 +308,7 @@ out:
 
 void auto_launch_update()
 {
+	// Check if already chainloaded update and clear flag. Otherwise check for updates.
 	if (EMC(EMC_SCRATCH0) & EMC_HEKA_UPD)
 		EMC(EMC_SCRATCH0) &= ~EMC_HEKA_UPD;
 	else if (sd_mount())
@@ -489,9 +496,6 @@ void ini_list_launcher()
 					goto wrong_emupath;
 				}
 
-				if (cfg_sec && !payload_path)
-					check_sept(cfg_sec);
-
 				if (!cfg_sec)
 				{
 					free(ments);
@@ -523,7 +527,7 @@ wrong_emupath:
 		if (emummc_path)
 		{
 			sd_mount();
-			emummc_load_cfg();
+			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
 		}
 	}
 
@@ -546,6 +550,9 @@ void launch_firmware()
 
 	if (sd_mount())
 	{
+		// Load emuMMC configuration.
+		emummc_load_cfg();
+
 		if (ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
 		{
 			// Build configuration menu.
@@ -630,9 +637,6 @@ void launch_firmware()
 				goto wrong_emupath;
 			}
 
-			if (cfg_sec && !payload_path)
-				check_sept(cfg_sec);
-
 			if (!cfg_sec)
 			{
 				free(ments);
@@ -665,7 +669,7 @@ wrong_emupath:
 		if (emummc_path)
 		{
 			sd_mount();
-			emummc_load_cfg();
+			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
 		}
 	}
 
@@ -689,12 +693,7 @@ void nyx_load_run()
 
 	sd_end();
 
-	// Show loading logo.
-	gfx_clear_grey(0x1B);
-	u8 *BOOTLOGO = (void *)malloc(0x4000);
-	blz_uncompress_srcdest(BOOTLOGO_BLZ, SZ_BOOTLOGO_BLZ, BOOTLOGO, SZ_BOOTLOGO);
-	gfx_set_rect_grey(BOOTLOGO, X_BOOTLOGO, Y_BOOTLOGO, 326, 544);
-	free(BOOTLOGO);
+	render_default_bootlogo();
 	display_backlight_brightness(h_cfg.backlight, 1000);
 
 	// Check if Nyx version is old.
@@ -720,12 +719,6 @@ void nyx_load_run()
 	nyx_str->cfg = 0;
 	if (b_cfg.extra_cfg)
 	{
-		if (b_cfg.extra_cfg & EXTRA_CFG_NYX_SEPT)
-		{
-			b_cfg.extra_cfg &= ~(EXTRA_CFG_NYX_SEPT);
-			nyx_str->cfg |= NYX_CFG_SEPT;
-			nyx_str->cfg |= b_cfg.sept << 24;
-		}
 		if (b_cfg.extra_cfg & EXTRA_CFG_NYX_UMS)
 		{
 			b_cfg.extra_cfg &= ~(EXTRA_CFG_NYX_UMS);
@@ -804,24 +797,6 @@ static void _bootloader_corruption_protect()
 
 static void _auto_launch_firmware()
 {
-	if(b_cfg.extra_cfg & EXTRA_CFG_NYX_SEPT)
-	{
-		if (!h_cfg.sept_run)
-			EMC(EMC_SCRATCH0) |= EMC_HEKA_UPD;
-		check_sept(NULL);
-	}
-
-	if (!h_cfg.sept_run)
-		auto_launch_update();
-
-	u8 *BOOTLOGO = NULL;
-	char *payload_path = NULL;
-	char *emummc_path = NULL;
-	u32 btn = 0;
-	bool boot_from_id = (b_cfg.boot_cfg & BOOT_CFG_FROM_ID) && (b_cfg.boot_cfg & BOOT_CFG_AUTOBOOT_EN);
-	if (boot_from_id)
-		b_cfg.id[7] = 0;
-
 	struct _bmp_data
 	{
 		u32 size;
@@ -832,19 +807,27 @@ static void _auto_launch_firmware()
 		u32 pos_y;
 	};
 
-	struct _bmp_data bmpData;
-	bool bootlogoFound = false;
+	char *emummc_path = NULL;
 	char *bootlogoCustomEntry = NULL;
+	ini_sec_t *cfg_sec = NULL;
+
+	auto_launch_update();
+
+	bool boot_from_id = (b_cfg.boot_cfg & BOOT_CFG_FROM_ID) && (b_cfg.boot_cfg & BOOT_CFG_AUTOBOOT_EN);
+	if (boot_from_id)
+		b_cfg.id[7] = 0;
 
 	if (!(b_cfg.boot_cfg & BOOT_CFG_FROM_LAUNCH))
 		gfx_con.mute = true;
 
-	ini_sec_t *cfg_sec = NULL;
 	LIST_INIT(ini_sections);
 	LIST_INIT(ini_list_sections);
 
 	if (sd_mount())
 	{
+		// Load emuMMC configuration.
+		emummc_load_cfg();
+
 		if (f_stat("bootloader/hekate_ipl.ini", NULL))
 			create_config_entry();
 
@@ -869,7 +852,17 @@ static void _auto_launch_firmware()
 							else if (!strcmp("autoboot_list", kv->key))
 								h_cfg.autoboot_list = atoi(kv->val);
 							else if (!strcmp("bootwait", kv->key))
+							{
 								h_cfg.bootwait = atoi(kv->val);
+
+								/*
+								 * Clamp value to default if it exceeds 20s to protect against corruption.
+								 * Allow up to 20s though for use in cases where user needs lots of time.
+								 * For example dock-only use and r2p with enough time to reach dock and cancel it.
+								*/
+								if (h_cfg.bootwait > 20)
+									h_cfg.bootwait = 3;
+							}
 							else if (!strcmp("backlight", kv->key))
 								h_cfg.backlight = atoi(kv->val);
 							else if (!strcmp("autohosoff", kv->key))
@@ -883,16 +876,11 @@ static void _auto_launch_firmware()
 						}
 						boot_entry_id++;
 
-						// Override autoboot, otherwise save it for a possbile sept run.
+						// Override autoboot.
 						if (b_cfg.boot_cfg & BOOT_CFG_AUTOBOOT_EN)
 						{
 							h_cfg.autoboot = b_cfg.autoboot;
 							h_cfg.autoboot_list = b_cfg.autoboot_list;
-						}
-						else
-						{
-							b_cfg.autoboot = h_cfg.autoboot;
-							b_cfg.autoboot_list = h_cfg.autoboot_list;
 						}
 
 						// Apply bootloader protection against corruption.
@@ -983,9 +971,13 @@ skip_list:
 		goto out;
 
 	u8 *bitmap = NULL;
-	if (!(b_cfg.boot_cfg & BOOT_CFG_FROM_LAUNCH) && h_cfg.bootwait && !h_cfg.sept_run)
+	struct _bmp_data bmpData;
+	bool bootlogoFound = false;
+	if (!(b_cfg.boot_cfg & BOOT_CFG_FROM_LAUNCH) && h_cfg.bootwait)
 	{
 		u32 fsize;
+		u8 *BOOTLOGO = NULL;
+
 		if (bootlogoCustomEntry) // Check if user set custom logo path at the boot entry.
 			bitmap = (u8 *)sd_file_read(bootlogoCustomEntry, &fsize);
 
@@ -1010,10 +1002,10 @@ skip_list:
 				bmpData.size_x <= 720 &&
 				bmpData.size_y <= 1280)
 			{
-				if (bmpData.size <= fsize && ((bmpData.size - bmpData.offset) < 0x400000))
+				if (bmpData.size <= fsize && ((bmpData.size - bmpData.offset) < SZ_4M))
 				{
 					// Avoid unaligned access from BM 2-byte MAGIC and remove header.
-					BOOTLOGO = (u8 *)malloc(0x400000);
+					BOOTLOGO = (u8 *)malloc(SZ_4M);
 					memcpy(BOOTLOGO, bitmap + bmpData.offset, bmpData.size - bmpData.offset);
 					free(bitmap);
 					// Center logo if res < 720x1280.
@@ -1035,32 +1027,27 @@ skip_list:
 		{
 			gfx_render_bmp_argb((u32 *)BOOTLOGO, bmpData.size_x, bmpData.size_y,
 				bmpData.pos_x, bmpData.pos_y);
+			free(BOOTLOGO);
 		}
 		else
-		{
-			gfx_clear_grey(0x1B);
-			BOOTLOGO = (void *)malloc(0x4000);
-			blz_uncompress_srcdest(BOOTLOGO_BLZ, SZ_BOOTLOGO_BLZ, BOOTLOGO, SZ_BOOTLOGO);
-			gfx_set_rect_grey(BOOTLOGO, X_BOOTLOGO, Y_BOOTLOGO, 326, 544);
-		}
-		free(BOOTLOGO);
+			render_default_bootlogo();
 	}
 
 	if (b_cfg.boot_cfg & BOOT_CFG_FROM_LAUNCH)
 		display_backlight_brightness(h_cfg.backlight, 0);
-	else if (!h_cfg.sept_run && h_cfg.bootwait)
+	else if (h_cfg.bootwait)
 		display_backlight_brightness(h_cfg.backlight, 1000);
 
 	// Wait before booting. If VOL- is pressed go into bootloader menu.
-	if (!h_cfg.sept_run && !(b_cfg.boot_cfg & BOOT_CFG_FROM_LAUNCH))
+	if (!(b_cfg.boot_cfg & BOOT_CFG_FROM_LAUNCH))
 	{
-		btn = btn_wait_timeout_single(h_cfg.bootwait * 1000, BTN_VOL_DOWN | BTN_SINGLE);
+		u32 btn = btn_wait_timeout_single(h_cfg.bootwait * 1000, BTN_VOL_DOWN | BTN_SINGLE);
 
 		if (btn & BTN_VOL_DOWN)
 			goto out;
 	}
 
-	payload_path = ini_check_payload_section(cfg_sec);
+	char *payload_path = ini_check_payload_section(cfg_sec);
 
 	if (payload_path)
 	{
@@ -1079,7 +1066,6 @@ skip_list:
 			goto wrong_emupath;
 		}
 
-		check_sept(cfg_sec);
 		hos_launch(cfg_sec);
 
 wrong_emupath:
@@ -1088,7 +1074,7 @@ wrong_emupath:
 		if (emummc_path || b_cfg.boot_cfg & BOOT_CFG_TO_EMUMMC)
 		{
 			sd_mount();
-			emummc_load_cfg();
+			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
 		}
 
 payload_error:
@@ -1105,54 +1091,12 @@ out:
 	// Clear boot reasons from binary.
 	if (b_cfg.boot_cfg & (BOOT_CFG_FROM_ID | BOOT_CFG_TO_EMUMMC))
 		memset(b_cfg.xt_str, 0, sizeof(b_cfg.xt_str));
-	b_cfg.boot_cfg &= BOOT_CFG_SEPT_RUN;
 	h_cfg.emummc_force_disable = false;
 
 	// L4T: Clear custom boot mode flags from PMC_SCRATCH0.
 	PMC(APBDEV_PMC_SCRATCH0) &= ~PMC_SCRATCH0_MODE_CUSTOM_ALL;
 
 	nyx_load_run();
-}
-
-static void _patched_rcm_protection()
-{
-	if (!h_cfg.rcm_patched || hw_get_chip_id() == GP_HIDREV_MAJOR_T210B01)
-		return;
-
-	// Check if AutoRCM is enabled and protect from a permanent brick.
-	if (!sdmmc_storage_init_mmc(&emmc_storage, &emmc_sdmmc, SDMMC_BUS_WIDTH_8, SDHCI_TIMING_MMC_HS400))
-		return;
-
-	u8 *buf = (u8 *)malloc(0x200);
-	sdmmc_storage_set_mmc_partition(&emmc_storage, EMMC_BOOT0);
-
-	u32 sector;
-	u8 corr_mod0, mod1;
-
-	// Get the correct RSA modulus byte masks.
-	nx_emmc_get_autorcm_masks(&corr_mod0, &mod1);
-
-	// Iterate BCTs.
-	for (u32 i = 0; i < 4; i++)
-	{
-		sector = 1 + (32 * i); // 0x4000 bct + 0x200 offset.
-		sdmmc_storage_read(&emmc_storage, sector, 1, buf);
-
-		// Check if 2nd byte of modulus is correct.
-		if (buf[0x11] != mod1)
-			continue;
-
-		// If AutoRCM is enabled, disable it.
-		if (buf[0x10] != corr_mod0)
-		{
-			buf[0x10] = corr_mod0;
-
-			sdmmc_storage_write(&emmc_storage, sector, 1, buf);
-		}
-	}
-
-	free(buf);
-	sdmmc_storage_end(&emmc_storage);
 }
 
 #define EXCP_EN_ADDR   0x4003FFFC
@@ -1169,17 +1113,26 @@ static void _show_errors()
 	u32 *excp_enabled = (u32 *)EXCP_EN_ADDR;
 	u32 *excp_type = (u32 *)EXCP_TYPE_ADDR;
 	u32 *excp_lr = (u32 *)EXCP_LR_ADDR;
+	u32 panic_status = hw_rst_status & 0xFFFFF;
 
 	if (*excp_enabled == EXCP_MAGIC)
 		h_cfg.errors |= ERR_EXCEPTION;
 
-	//! FIXME: Find a better way to identify if that scratch has proper data.
-	if (0 && PMC(APBDEV_PMC_SCRATCH37) & PMC_SCRATCH37_KERNEL_PANIC_FLAG)
+#if 0 //! FIXME: Find a better way to identify if that scratch has proper data.
+	if (PMC(APBDEV_PMC_SCRATCH37) & PMC_SCRATCH37_KERNEL_PANIC_FLAG)
 	{
 		// Set error and clear flag.
 		h_cfg.errors |= ERR_L4T_KERNEL;
 		PMC(APBDEV_PMC_SCRATCH37) &= ~PMC_SCRATCH37_KERNEL_PANIC_FLAG;
 	}
+#endif
+
+	if (hw_rst_reason == PMC_RST_STATUS_WATCHDOG &&
+		panic_status <= 0xFF && panic_status != 0x20 && panic_status != 0x21)
+		h_cfg.errors |= ERR_PANIC_CODE;
+
+	// Check if we had a panic while in CFW.
+	secmon_exo_check_panic();
 
 	if (h_cfg.errors)
 	{
@@ -1222,17 +1175,34 @@ static void _show_errors()
 			*excp_enabled = 0;
 		}
 
+#if 0 //! FIXME: Find a better way to identify if that scratch has proper data.
 		if (0 && h_cfg.errors & ERR_L4T_KERNEL)
 		{
-			WPRINTF("Panic occurred while running L4T.\n");
+			WPRINTF("A kernel panic occurred!\n");
 			if (!sd_save_to_file((void *)PSTORE_ADDR, PSTORE_SZ, "L4T_panic.bin"))
 				WPRINTF("PSTORE saved to L4T_panic.bin\n");
+		}
+#endif
+
+		if (h_cfg.errors & ERR_PANIC_CODE)
+		{
+			u32 r = (hw_rst_status >> 20) & 0xF;
+			u32 g = (hw_rst_status >> 24) & 0xF;
+			u32 b = (hw_rst_status >> 28) & 0xF;
+			r = (r << 16) | (r << 20);
+			g = (g << 8) | (g << 12);
+			b = (b << 0) | (b << 4);
+			u32 color = r | g | b;
+
+			WPRINTF("A panic error occurred!\n");
+			gfx_printf("Color: %k####%k, Code: %02X\n\n", color, 0xFFCCCCCC, panic_status);
 		}
 
 		WPRINTF("Press any key...");
 
-		msleep(1000);
+		msleep(1000); // Guard against injection VOL+.
 		btn_wait();
+		msleep(500);  // Guard against force menu VOL-.
 	}
 }
 
@@ -1254,7 +1224,7 @@ static void _check_low_battery()
 		goto out;
 
 	// Prepare battery icon resources.
-	u8 *battery_res = malloc(ALIGN(SZ_BATTERY_EMPTY, 0x1000));
+	u8 *battery_res = malloc(ALIGN(SZ_BATTERY_EMPTY, SZ_4K));
 	blz_uncompress_srcdest(BATTERY_EMPTY_BLZ, SZ_BATTERY_EMPTY_BLZ, battery_res, SZ_BATTERY_EMPTY);
 
 	u8 *battery_icon = malloc(0x95A);  // 21x38x3
@@ -1411,19 +1381,6 @@ static void _about()
 	btn_wait();
 }
 
-ment_t ment_options[] = {
-	MDEF_BACK(),
-	MDEF_CHGLINE(),
-	MDEF_HANDLER("Auto boot", config_autoboot),
-	MDEF_HANDLER("Boot delay", config_bootdelay),
-	MDEF_HANDLER("Auto NoGC", config_nogc),
-	MDEF_HANDLER("Auto HOS power off", config_auto_hos_poweroff),
-	MDEF_HANDLER("Backlight", config_backlight),
-	MDEF_END()
-};
-
-menu_t menu_options = { ment_options, "Options", 0, 0 };
-
 ment_t ment_cinfo[] = {
 	MDEF_BACK(),
 	MDEF_CHGLINE(),
@@ -1431,7 +1388,6 @@ ment_t ment_cinfo[] = {
 	MDEF_HANDLER("Ipatches & bootrom", bootrom_ipatches_info),
 	MDEF_HANDLER("Fuses", print_fuseinfo),
 	//MDEF_HANDLER("Print kfuse info", print_kfuseinfo),
-	//MDEF_HANDLER("Print TSEC keys", print_tsec_key),
 	MDEF_CHGLINE(),
 	MDEF_CAPTION("-- Storage Info --", 0xFF0AB9E6),
 	MDEF_HANDLER("eMMC", print_mmc_info),
@@ -1482,10 +1438,6 @@ ment_t ment_tools[] = {
 	//MDEF_CHGLINE(),
 	//MDEF_CAPTION("-------- Misc --------", 0xFF0AB9E6),
 	//MDEF_HANDLER("Dump package1/2", dump_packages12),
-	//MDEF_HANDLER("Fix archive bit (except Nintendo)", fix_sd_all_attr),
-	//MDEF_HANDLER("Fix archive bit (Nintendo only)", fix_sd_nin_attr),
-	//MDEF_HANDLER("Fix fuel gauge configuration", fix_fuel_gauge_configuration),
-	//MDEF_HANDLER("Reset all battery cfg", reset_pmic_fuel_gauge_charger_config),
 	//MDEF_CHGLINE(),
 	MDEF_CAPTION("-------- Other -------", 0xFFFFDD00),
 	MDEF_HANDLER("AutoRCM", menu_autorcm),
@@ -1500,7 +1452,6 @@ power_state_t STATE_REBOOT_BYPASS_FUSES = REBOOT_BYPASS_FUSES;
 
 ment_t ment_top[] = {
 	MDEF_HANDLER("Launch", launch_firmware),
-	//MDEF_MENU("Options", &menu_options),
 	MDEF_CAPTION("---------------", 0xFF444444),
 	MDEF_MENU("Tools",        &menu_tools),
 	MDEF_MENU("Console info", &menu_cinfo),
@@ -1514,7 +1465,7 @@ ment_t ment_top[] = {
 	MDEF_END()
 };
 
-menu_t menu_top = { ment_top, "hekate v5.5.8", 0, 0 };
+menu_t menu_top = { ment_top, "hekate v5.6.5", 0, 0 };
 
 extern void pivot_stack(u32 stack_top);
 
@@ -1565,16 +1516,7 @@ void ipl_main()
 	// Overclock BPMP.
 	bpmp_clk_rate_set(h_cfg.t210b01 ? BPMP_CLK_DEFAULT_BOOST : BPMP_CLK_LOWER_BOOST);
 
-	// Check if we had a panic while in CFW.
-	secmon_exo_check_panic();
-
-	// Check if RCM is patched and protect from a possible brick.
-	_patched_rcm_protection();
-
-	// Load emuMMC configuration from SD.
-	emummc_load_cfg();
-
-	// Show exception, library errors and L4T kernel panics.
+	// Show exceptions, HOS errors, library errors and L4T kernel panics.
 	_show_errors();
 
 	// Load saved configuration and auto boot if enabled.

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018 naehrwert
- * Copyright (c) 2018-2020 CTCaer
+ * Copyright (c) 2018-2021 CTCaer
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -262,16 +262,7 @@ static int _config_exo_cal0_writes_enable(launch_ctxt_t *ctxt, const char *value
 
 static int _config_fss(launch_ctxt_t *ctxt, const char *value)
 {
-	LIST_FOREACH_ENTRY(ini_kv_t, kv, &ctxt->cfg->kvs, link)
-	{
-		if (!strcmp("fss0experimental", kv->key))
-		{
-			ctxt->fss0_experimental = *kv->val == '1';
-			break;
-		}
-	}
-
-	return parse_fss(ctxt, value, NULL);
+	return parse_fss(ctxt, value);
 }
 
 static int _config_exo_fatal_payload(launch_ctxt_t *ctxt, const char *value)

@@ -38,7 +38,6 @@ void set_default_configuration()
 	h_cfg.autoboot = 0;
 	h_cfg.autoboot_list = 0;
 	h_cfg.bootwait = 3;
-	h_cfg.se_keygen_done = 0;
 	h_cfg.backlight = 100;
 	h_cfg.autohosoff = 0;
 	h_cfg.autonogc = 1;
@@ -46,10 +45,7 @@ void set_default_configuration()
 	h_cfg.bootprotect = 0;
 	h_cfg.errors = 0;
 	h_cfg.eks = NULL;
-	h_cfg.sept_run = EMC(EMC_SCRATCH0) & EMC_SEPT_RUN;
-	h_cfg.aes_slots_new = false;
 	h_cfg.rcm_patched = fuse_check_patched_rcm();
-	h_cfg.sbk_set = FUSE(FUSE_PRIVATE_KEY0) == 0xFFFFFFFF;
 	h_cfg.emummc_force_disable = false;
 	h_cfg.t210b01 = hw_get_chip_id() == GP_HIDREV_MAJOR_T210B01;
 
@@ -100,28 +96,42 @@ int create_config_entry()
 
 	if (f_open(&fp, "bootloader/hekate_ipl.ini", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
 		return 1;
+
 	// Add config entry.
 	f_puts("[config]\nautoboot=", &fp);
 	itoa(h_cfg.autoboot, lbuf, 10);
 	f_puts(lbuf, &fp);
+
 	f_puts("\nautoboot_list=", &fp);
 	itoa(h_cfg.autoboot_list, lbuf, 10);
 	f_puts(lbuf, &fp);
+	/*
+	 * Clamp value to default if it exceeds 20s to protect against corruption.
+	 * Allow up to 20s though for use in cases where user needs lots of time.
+	 * For example dock-only use and r2p with enough time to reach dock and cancel it.
+	*/
+	if (h_cfg.bootwait > 20)
+		h_cfg.bootwait = 3;
 	f_puts("\nbootwait=", &fp);
 	itoa(h_cfg.bootwait, lbuf, 10);
 	f_puts(lbuf, &fp);
+
 	f_puts("\nbacklight=", &fp);
 	itoa(h_cfg.backlight, lbuf, 10);
 	f_puts(lbuf, &fp);
+
 	f_puts("\nautohosoff=", &fp);
 	itoa(h_cfg.autohosoff, lbuf, 10);
 	f_puts(lbuf, &fp);
+
 	f_puts("\nautonogc=", &fp);
 	itoa(h_cfg.autonogc, lbuf, 10);
 	f_puts(lbuf, &fp);
+
 	f_puts("\nupdater2p=", &fp);
 	itoa(h_cfg.updater2p, lbuf, 10);
 	f_puts(lbuf, &fp);
+
 	f_puts("\nbootprotect=", &fp);
 	itoa(h_cfg.bootprotect, lbuf, 10);
 	f_puts(lbuf, &fp);

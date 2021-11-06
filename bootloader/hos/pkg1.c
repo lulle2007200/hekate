@@ -170,7 +170,8 @@ static const pkg1_id_t _pkg1_ids[] = {
 	{ "20201030110855", 10, 14, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 11.0.0 - 11.0.1.
 	{ "20210129111626", 10, 14, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 12.0.0 - 12.0.1.
 	{ "20210422145837", 10, 15, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 12.0.2 - 12.0.3.
-	{ "20210607122020", 11, 15, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 12.1.0+
+	{ "20210607122020", 11, 15, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 12.1.0.
+	{ "20210805123738", 12, 15, 0x0E00, 0x6FE0, 0x40030000, 0x4003E000, NULL }, // 13.0.0+
 };
 
 const pkg1_id_t *pkg1_get_latest()
@@ -181,13 +182,16 @@ const pkg1_id_t *pkg1_get_latest()
 const pkg1_id_t *pkg1_identify(u8 *pkg1)
 {
 	char build_date[15];
-	memcpy(build_date, (char *)(pkg1 + 0x10), 14);
+	pk1_hdr_t *hdr = (pk1_hdr_t *)pkg1;
+
+	memcpy(build_date, hdr->timestamp, 14);
 	build_date[14] = 0;
 	gfx_printf("Found pkg1 ('%s').\n\n", build_date);
 
-	for (u32 i = 0; i < ARRAY_SIZE(_pkg1_ids); i++)
-		if (!memcmp(pkg1 + 0x10, _pkg1_ids[i].id, 8))
+	for (int i = ARRAY_SIZE(_pkg1_ids) - 1; i >= 0; i--)
+		if (!memcmp(hdr->timestamp, _pkg1_ids[i].id, 8))
 			return &_pkg1_ids[i];
+
 	return NULL;
 }
 
@@ -212,7 +216,7 @@ int pkg1_decrypt(const pkg1_id_t *id, u8 *pkg1)
 		// Use BEK for T210B01.
 		// Additionally, skip 0x20 bytes from decryption to maintain the header.
 		se_aes_iv_clear(13);
-		se_aes_crypt_cbc(13, 0, pkg1 + 0x20, oem_hdr->size - 0x20, pkg1 + 0x20, oem_hdr->size - 0x20);
+		se_aes_crypt_cbc(13, DECRYPT, pkg1 + 0x20, oem_hdr->size - 0x20, pkg1 + 0x20, oem_hdr->size - 0x20);
 	}
 
 	// Return if header is valid.
