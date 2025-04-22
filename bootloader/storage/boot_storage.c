@@ -1,6 +1,6 @@
 #include "boot_storage.h"
 #include <libs/fatfs/ff.h>
-#include "../libs/fatfs/ffconf.h"
+#include <fatfs_cfg.h>
 #include <storage/sd.h>
 #include <storage/emmc.h>
 #include <utils/types.h>
@@ -11,10 +11,10 @@ static FATFS boot_storage_fs;
 static BYTE drive = -1;
 
 static const char* drive_base_paths[] = {
-	[FF_DEV_SD]        = XSTR(FF_DEV_SD)        ":",
-	[FF_DEV_BOOT1]     = XSTR(FF_DEV_BOOT1)     ":",
-	[FF_DEV_BOOT1_1MB] = XSTR(FF_DEV_BOOT1_1MB) ":",
-	[FF_DEV_GPP]       = XSTR(FF_DEV_GPP)       ":",
+	[DRIVE_SD]        = XSTR(DRIVE_SD)        ":",
+	[DRIVE_BOOT1]     = XSTR(DRIVE_BOOT1)     ":",
+	[DRIVE_BOOT1_1MB] = XSTR(DRIVE_BOOT1_1MB) ":",
+	[DRIVE_EMMC]       = XSTR(DRIVE_EMMC)       ":",
 };
 
 static bool _is_eligible(){
@@ -30,11 +30,11 @@ bool boot_storage_get_mounted(){
 
 bool boot_storage_get_initialized(){
 	switch(drive){
-	case FF_DEV_BOOT1:
-	case FF_DEV_GPP:
-	case FF_DEV_BOOT1_1MB:
+	case DRIVE_BOOT1:
+	case DRIVE_EMMC:
+	case DRIVE_BOOT1_1MB:
 		return emmc_get_initialized();
-	case FF_DEV_SD:
+	case DRIVE_SD:
 		return sd_get_card_initialized();
 	}
 	return false;
@@ -42,11 +42,11 @@ bool boot_storage_get_initialized(){
 
 static bool _boot_storage_initialize(){
 	switch(drive){
-	case FF_DEV_BOOT1:
-	case FF_DEV_GPP:
-	case FF_DEV_BOOT1_1MB:
+	case DRIVE_BOOT1:
+	case DRIVE_EMMC:
+	case DRIVE_BOOT1_1MB:
 		return emmc_initialize(false);
-	case FF_DEV_SD:
+	case DRIVE_SD:
 		return sd_initialize(false);
 	}
 	return false;
@@ -54,7 +54,7 @@ static bool _boot_storage_initialize(){
 
 static void _boot_storage_end(bool deinit){
 	if(boot_storage_get_mounted()){
-		if(drive == FF_DEV_SD){
+		if(drive == DRIVE_SD){
 			sd_unmount();
 		}else{
 			f_mount(NULL, drive_base_paths[drive], false);
@@ -62,7 +62,7 @@ static void _boot_storage_end(bool deinit){
 		drive = DEV_INVALID;
 	}
 	if(deinit){
-		if(drive == FF_DEV_SD){
+		if(drive == DRIVE_SD){
 			sd_end();
 		}else{
 			emmc_end();
@@ -87,7 +87,7 @@ static bool _boot_storage_mount(){
 		goto emmc_init_fail;
 	}
 
-	static const BYTE emmc_drives[] = {FF_DEV_BOOT1_1MB, FF_DEV_BOOT1, FF_DEV_GPP}; 
+	static const BYTE emmc_drives[] = {DRIVE_BOOT1_1MB, DRIVE_BOOT1, DRIVE_EMMC}; 
 
 	for(BYTE i = 0; i < ARRAY_SIZE(emmc_drives); i++){
 		res = f_mount(&boot_storage_fs, drive_base_paths[i], true);
@@ -121,10 +121,10 @@ emmc_init_fail:
 		goto out;
 	}
 
-	res = f_chdrive(drive_base_paths[FF_DEV_SD]);
+	res = f_chdrive(drive_base_paths[DRIVE_SD]);
 
 	if(res == FR_OK && _is_eligible()){
-		drive = FF_DEV_SD;
+		drive = DRIVE_SD;
 		return true;
 	}
 

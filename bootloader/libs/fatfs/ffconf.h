@@ -300,9 +300,12 @@
 /  SemaphoreHandle_t and etc. A header file for O/S definitions needs to be
 /  included somewhere in the scope of ff.h. */
 
-#define FF_DEV_BOOT1     1
-#define FF_DEV_BOOT1_1MB 2
-#define FF_DEV_SD        0
-#define FF_DEV_GPP       3
+
+typedef enum {
+	DRIVE_SD        = 0,
+	DRIVE_BOOT1     = 1,
+	DRIVE_BOOT1_1MB = 2,
+	DRIVE_EMMC      = 3,
+} DDRIVE;
 
 /*--- End of configuration options ---*/

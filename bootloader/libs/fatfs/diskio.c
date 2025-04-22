@@ -14,18 +14,18 @@
 #include <bdk.h>
 
 #include <libs/fatfs/diskio.h>	/* FatFs lower layer API */
-#include "ffconf.h"
+#include <fatfs_cfg.h>
 
 static bool ensure_partition(BYTE pdrv){
 	u8 part;
 	switch(pdrv){
-	case FF_DEV_SD:
+	case DRIVE_SD:
 		return true;
-	case FF_DEV_BOOT1:
-	case FF_DEV_BOOT1_1MB:
+	case DRIVE_BOOT1:
+	case DRIVE_BOOT1_1MB:
 		part = EMMC_BOOT1;
 		break;
-	case FF_DEV_GPP:
+	case DRIVE_EMMC:
 		part = EMMC_GPP;
 		break;
 	default:
@@ -72,13 +72,13 @@ DRESULT disk_read (
 	sdmmc_storage_t *storage = &sd_storage;
 	u32 actual_sector = sector;
 	switch(pdrv){
-		case FF_DEV_SD:
+		case DRIVE_SD:
 			break;
-		case FF_DEV_BOOT1:
-		case FF_DEV_GPP:
+		case DRIVE_BOOT1:
+		case DRIVE_EMMC:
 			storage = &emmc_storage;
 			break;
-		case FF_DEV_BOOT1_1MB:
+		case DRIVE_BOOT1_1MB:
 			storage = &emmc_storage;
 			actual_sector = sector + (0x100000 / 512);
 			break;
@@ -105,13 +105,13 @@ DRESULT disk_write (
 	sdmmc_storage_t *storage = &sd_storage;
 	u32 actual_sector = sector;
 	switch(pdrv){
-		case FF_DEV_SD:
+		case DRIVE_SD:
 			break;
-		case FF_DEV_BOOT1:
-		case FF_DEV_GPP:
+		case DRIVE_BOOT1:
+		case DRIVE_EMMC:
 			storage = &emmc_storage;
 			break;
-		case FF_DEV_BOOT1_1MB:
+		case DRIVE_BOOT1_1MB:
 			storage = &emmc_storage;
 			actual_sector = sector + (0x100000 / 512);
 			break;
