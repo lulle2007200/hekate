@@ -23,6 +23,8 @@
 #include "../config.h"
 #include <libs/fatfs/ff.h>
 
+#define DEV_SD_BASE_PATH XSTR(FF_DEV_SD) ":"
+
 extern hekate_config h_cfg;
 emummc_cfg_t emu_cfg = { 0 };
 
@@ -77,7 +79,8 @@ bool emummc_set_path(char *path)
 	FIL fp;
 	bool found = false;
 
-	strcpy(emu_cfg.emummc_file_based_path, path);
+	strcpy(emu_cfg.emummc_file_based_path, DEV_SD_BASE_PATH);
+	strcat(emu_cfg.emummc_file_based_path, path);
 	strcat(emu_cfg.emummc_file_based_path, "/raw_based");
 
 	if (!f_open(&fp, emu_cfg.emummc_file_based_path, FA_READ))
@@ -88,7 +91,8 @@ bool emummc_set_path(char *path)
 	}
 	else
 	{
-		strcpy(emu_cfg.emummc_file_based_path, path);
+		strcpy(emu_cfg.emummc_file_based_path, DEV_SD_BASE_PATH);
+		strcat(emu_cfg.emummc_file_based_path, path);
 		strcat(emu_cfg.emummc_file_based_path, "/file_based");
 
 		if (!f_stat(emu_cfg.emummc_file_based_path, NULL))
@@ -149,7 +153,8 @@ int emummc_storage_init_mmc()
 
 	if (!emu_cfg.sector)
 	{
-		strcpy(emu_cfg.emummc_file_based_path, emu_cfg.path);
+		strcpy(emu_cfg.emummc_file_based_path, DEV_SD_BASE_PATH);
+		strcat(emu_cfg.emummc_file_based_path, emu_cfg.path);
 		strcat(emu_cfg.emummc_file_based_path, "/eMMC");
 
 		if (f_stat(emu_cfg.emummc_file_based_path, &fno))
@@ -279,7 +284,8 @@ int emummc_storage_set_mmc_partition(u32 partition)
 		return 1;
 	else
 	{
-		strcpy(emu_cfg.emummc_file_based_path, emu_cfg.path);
+		strcpy(emu_cfg.emummc_file_based_path, DEV_SD_BASE_PATH);
+		strcat(emu_cfg.emummc_file_based_path, emu_cfg.path);
 		strcat(emu_cfg.emummc_file_based_path, "/eMMC");
 
 		switch (partition)

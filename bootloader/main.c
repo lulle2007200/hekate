@@ -31,6 +31,7 @@
 #include <libs/compr/blz.h>
 #include <libs/fatfs/ff.h>
 #include "storage/emummc.h"
+#include "storage/boot_storage.h"
 
 #include "frontend/fe_tools.h"
 #include "frontend/fe_info.h"
@@ -205,7 +206,7 @@ static void _launch_payload(char *path, bool update, bool clear_screen)
 	if (update && is_ipl_updated(buf, path, false))
 		goto out;
 
-	sd_end();
+	boot_storage_end();
 
 	if (size < 0x30000)
 	{
@@ -264,8 +265,8 @@ static void _launch_payloads()
 	gfx_clear_grey(0x1B);
 	gfx_con_setpos(0, 0);
 
-	if (!sd_mount())
-		goto failed_sd_mount;
+	if (!boot_storage_mount())
+		goto failed_boot_storage_mount;
 
 	ments = (ment_t *)malloc(sizeof(ment_t) * (max_entries + 3));
 
@@ -308,7 +309,7 @@ static void _launch_payloads()
 			free(ments);
 			free(dir);
 			free(filelist);
-			sd_end();
+			boot_storage_end();
 
 			return;
 		}
@@ -324,11 +325,11 @@ static void _launch_payloads()
 		_launch_payload(dir, false, true);
 	}
 
-failed_sd_mount:
+failed_boot_storage_mount:
 	free(dir);
 	free(ments);
 	free(filelist);
-	sd_end();
+	boot_storage_end();
 
 	btn_wait();
 }
@@ -346,7 +347,7 @@ static void _launch_ini_list()
 	gfx_clear_grey(0x1B);
 	gfx_con_setpos(0, 0);
 
-	if (!sd_mount())
+	if (!boot_storage_mount())
 		goto parse_failed;
 
 	// Check that ini files exist and parse them.
@@ -449,7 +450,7 @@ parse_failed:
 wrong_emupath:
 		if (emummc_path)
 		{
-			sd_mount();
+			boot_storage_mount();
 			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
 		}
 	}
@@ -474,7 +475,7 @@ static void _launch_config()
 	gfx_clear_grey(0x1B);
 	gfx_con_setpos(0, 0);
 
-	if (!sd_mount())
+	if (!boot_storage_mount())
 		goto parse_failed;
 
 	// Load emuMMC configuration.
@@ -557,7 +558,7 @@ static void _launch_config()
 	if (!cfg_sec)
 	{
 		free(ments);
-		sd_end();
+		boot_storage_end();
 		return;
 	}
 
@@ -592,13 +593,13 @@ parse_failed:
 wrong_emupath:
 		if (emummc_path)
 		{
-			sd_mount();
+			boot_storage_mount();
 			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
 		}
 	}
 
 out:
-	sd_end();
+	boot_storage_end();
 
 	free(ments);
 
@@ -615,7 +616,7 @@ static void _nyx_load_run()
 	if (!nyx)
 		return;
 
-	sd_end();
+	boot_storage_end();
 
 	render_static_bootlogo();
 	display_backlight_brightness(h_cfg.backlight, 1000);
@@ -1010,7 +1011,7 @@ skip_list:
 wrong_emupath:
 		if (emummc_path || b_cfg.boot_cfg & BOOT_CFG_TO_EMUMMC)
 		{
-			sd_mount();
+			boot_storage_mount();
 			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
 		}
 
@@ -1482,7 +1483,8 @@ void ipl_main()
 	bpmp_clk_rate_set(h_cfg.t210b01 ? BPMP_CLK_DEFAULT_BOOST : BPMP_CLK_LOWER_BOOST);
 
 	// Mount SD Card.
-	h_cfg.errors |= !sd_mount() ? ERR_SD_BOOT_EN : 0;
+	// TODO: boot storage may not be sd card -> set proper error
+	h_cfg.errors |= !boot_storage_mount() ? ERR_SD_BOOT_EN : 0;
 
 	// Check if watchdog was fired previously.
 	if (watchdog_fired())
@@ -1525,7 +1527,7 @@ skip_lp0_minerva_config:
 		_auto_launch();
 
 	// Failed to launch Nyx, unmount SD Card.
-	sd_end();
+	boot_storage_end();
 
 	// Set ram to a freq that doesn't need periodic training.
 	minerva_change_freq(FREQ_800);

@@ -28,6 +28,7 @@
 #include "../frontend/fe_tools.h"
 #include "../config.h"
 #include "../storage/emummc.h"
+#include "../storage/boot_storage.h"
 
 extern hekate_config h_cfg;
 
@@ -1086,6 +1087,7 @@ int hos_launch(ini_sec_t *cfg)
 		config_exosphere(&ctxt, warmboot_base);
 
 	// Unmount SD card and eMMC.
+	boot_storage_end();
 	sd_end();
 	emmc_end();
 

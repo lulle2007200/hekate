@@ -25,6 +25,7 @@
 
 static u16 emmc_errors[3] = { 0 }; // Init and Read/Write errors.
 static u32 emmc_mode = EMMC_MMC_HS400;
+static bool emmc_init_done = false;
 
 sdmmc_t emmc_sdmmc;
 sdmmc_storage_t emmc_storage;
@@ -61,7 +62,18 @@ u32 emmc_get_mode()
 	return emmc_mode;
 }
 
-void emmc_end() { sdmmc_storage_end(&emmc_storage); }
+static void _emmc_deinit(){
+	if(emmc_init_done){
+		sdmmc_storage_end(&emmc_storage);
+		emmc_init_done = false;
+	}
+}
+
+void emmc_end() { _emmc_deinit(); }
+
+bool emmc_get_initialized(){
+	return emmc_init_done;
+}
 
 int emmc_init_retry(bool power_cycle)
 {
@@ -97,7 +109,13 @@ int emmc_init_retry(bool power_cycle)
 		emmc_mode = EMMC_MMC_HS400;
 	}
 
-	return sdmmc_storage_init_mmc(&emmc_storage, &emmc_sdmmc, bus_width, type);
+	int res = sdmmc_storage_init_mmc(&emmc_storage, &emmc_sdmmc, bus_width, type);
+	if(res){
+		emmc_init_done = true;
+	}else{
+		emmc_init_done = false;
+	}
+	return res;
 }
 
 bool emmc_initialize(bool power_cycle)

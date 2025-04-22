@@ -199,7 +199,7 @@ bool sd_mount()
 	else
 	{
 		if (!sd_mounted)
-			res = f_mount(&sd_fs, "0:", 1); // Volume 0 is SD.
+			res = f_mount(&sd_fs, XSTR(FF_DEV_SD) ":", 1); // Volume 0 is SD.
 		if (res == FR_OK)
 		{
 			sd_mounted = true;
@@ -227,7 +227,7 @@ static void _sd_deinit(bool deinit)
 	if (sd_init_done)
 	{
 		if (sd_mounted)
-			f_mount(NULL, "0:", 1); // Volume 0 is SD.
+			f_mount(NULL, XSTR(FF_DEV_SD) ":", 1); // Volume 0 is SD.
 
 		if (deinit)
 		{

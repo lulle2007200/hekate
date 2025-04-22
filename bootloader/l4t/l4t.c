@@ -25,6 +25,7 @@
 #include "../hos/pkg1.h"
 #include "l4t.h"
 #include "l4t_config.inl"
+#include "../storage/boot_storage.h"
 
 /*
  * API Revision info
@@ -1025,7 +1026,7 @@ void launch_l4t(const ini_sec_t *ini_sec, int entry_idx, int is_list, bool t210b
 		return;
 
 	// Done loading bootloaders/firmware.
-	sd_end();
+	boot_storage_end();
 
 	// We don't need AHB aperture open.
 	mc_disable_ahb_redirect();

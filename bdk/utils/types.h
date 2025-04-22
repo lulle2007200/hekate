@@ -105,6 +105,9 @@ typedef unsigned long uptr;
 #define likely(x)   (__builtin_expect((x) != 0, 1))
 #define unlikely(x) (__builtin_expect((x) != 0, 0))
 
+#define XSTR(a) STR(a)
+#define STR(a) #a
+
 /* Bootloader/Nyx */
 #define BOOT_CFG_AUTOBOOT_EN BIT(0)
 #define BOOT_CFG_FROM_LAUNCH BIT(1)

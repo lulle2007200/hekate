@@ -7,11 +7,37 @@
 /* storage control modules to the FatFs module with a defined API.       */
 /*-----------------------------------------------------------------------*/
 
+#include <storage/sd.h>
+#include <storage/sdmmc.h>
 #include <string.h>
 
 #include <bdk.h>
 
 #include <libs/fatfs/diskio.h>	/* FatFs lower layer API */
+#include "ffconf.h"
+
+static bool ensure_partition(BYTE pdrv){
+	u8 part;
+	switch(pdrv){
+	case FF_DEV_SD:
+		return true;
+	case FF_DEV_BOOT1:
+	case FF_DEV_BOOT1_1MB:
+		part = EMMC_BOOT1;
+		break;
+	case FF_DEV_GPP:
+		part = EMMC_GPP;
+		break;
+	default:
+		return false;
+	}
+
+	if(emmc_storage.partition != part){
+		return emmc_set_partition(part);
+	}
+
+	return true;
+}
 
 /*-----------------------------------------------------------------------*/
 /* Get Drive Status                                                      */
@@ -43,7 +69,27 @@ DRESULT disk_read (
 	UINT count		/* Number of sectors to read */
 )
 {
-	return sdmmc_storage_read(&sd_storage, sector, count, buff) ? RES_OK : RES_ERROR;
+	sdmmc_storage_t *storage = &sd_storage;
+	u32 actual_sector = sector;
+	switch(pdrv){
+		case FF_DEV_SD:
+			break;
+		case FF_DEV_BOOT1:
+		case FF_DEV_GPP:
+			storage = &emmc_storage;
+			break;
+		case FF_DEV_BOOT1_1MB:
+			storage = &emmc_storage;
+			actual_sector = sector + (0x100000 / 512);
+			break;
+		default:
+			return RES_ERROR;
+
+	}
+
+	ensure_partition(pdrv);
+
+	return sdmmc_storage_read(storage, actual_sector, count, buff) ? RES_OK : RES_ERROR;
 }
 
 /*-----------------------------------------------------------------------*/
@@ -56,7 +102,27 @@ DRESULT disk_write (
 	UINT count			/* Number of sectors to write */
 )
 {
-	return sdmmc_storage_write(&sd_storage, sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+	sdmmc_storage_t *storage = &sd_storage;
+	u32 actual_sector = sector;
+	switch(pdrv){
+		case FF_DEV_SD:
+			break;
+		case FF_DEV_BOOT1:
+		case FF_DEV_GPP:
+			storage = &emmc_storage;
+			break;
+		case FF_DEV_BOOT1_1MB:
+			storage = &emmc_storage;
+			actual_sector = sector + (0x100000 / 512);
+			break;
+		default:
+			return RES_ERROR;
+
+	}
+
+	ensure_partition(pdrv);
+
+	return sdmmc_storage_write(storage, actual_sector, count, (void*)buff) ? RES_OK : RES_ERROR;
 }
 
 /*-----------------------------------------------------------------------*/

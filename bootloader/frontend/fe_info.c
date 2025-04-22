@@ -15,6 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <storage/sd.h>
 #include <string.h>
 
 #include <bdk.h>
@@ -232,20 +233,19 @@ void print_sdcard_info()
 			sd_storage.ssr.app_class, sd_storage.csd.write_protect,
 			sd_errors[0], sd_errors[1], sd_errors[2]); // SD_ERROR_INIT_FAIL, SD_ERROR_RW_FAIL, SD_ERROR_RW_RETRY.
 
-		int res = f_mount(&sd_fs, "", 1);
-		if (!res)
+		if (sd_mount())
 		{
 			gfx_puts("Acquiring FAT volume info...\n\n");
-			f_getfree("", &sd_fs.free_clst, NULL);
+			f_getfree(XSTR(FF_DEV_SD) ":", &sd_fs.free_clst, NULL);
 			gfx_printf("%kFound %s volume:%k\n Free:    %d MiB\n Cluster: %d KiB\n",
 					TXT_CLR_CYAN_L, sd_fs.fs_type == FS_EXFAT ? "exFAT" : "FAT32", TXT_CLR_DEFAULT,
 					sd_fs.free_clst * sd_fs.csize >> SECTORS_TO_MIB_COEFF, (sd_fs.csize > 1) ? (sd_fs.csize >> 1) : 512);
-			f_mount(NULL, "", 1);
+			sd_end();
 		}
 		else
 		{
-			EPRINTFARGS("Failed to mount SD card (FatFS Error %d).\n"
-				"Make sure that a FAT partition exists..", res);
+			EPRINTF("Failed to mount SD card.\n"
+				"Make sure that a FAT partition exists..");
 		}
 
 		sd_end();
