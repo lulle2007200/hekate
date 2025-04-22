@@ -25,7 +25,7 @@
 #include "../hos/pkg1.h"
 #include "l4t.h"
 #include "l4t_config.inl"
-#include "../storage/boot_storage.h"
+#include <storage/boot_storage.h>
 
 /*
  * API Revision info

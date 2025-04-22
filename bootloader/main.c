@@ -31,7 +31,7 @@
 #include <libs/compr/blz.h>
 #include <libs/fatfs/ff.h>
 #include "storage/emummc.h"
-#include "storage/boot_storage.h"
+#include <storage/boot_storage.h>
 
 #include "frontend/fe_tools.h"
 #include "frontend/fe_info.h"

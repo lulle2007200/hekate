@@ -28,7 +28,7 @@
 #include "../frontend/fe_tools.h"
 #include "../config.h"
 #include "../storage/emummc.h"
-#include "../storage/boot_storage.h"
+#include <storage/boot_storage.h>
 
 extern hekate_config h_cfg;
 

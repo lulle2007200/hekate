@@ -69,6 +69,10 @@ DRESULT disk_read (
 	UINT count		/* Number of sectors to read */
 )
 {
+	if(!ensure_partition(pdrv)){
+		return RES_ERROR;
+	}
+	
 	sdmmc_storage_t *storage = &sd_storage;
 	u32 actual_sector = sector;
 	switch(pdrv){
@@ -87,7 +91,6 @@ DRESULT disk_read (
 
 	}
 
-	ensure_partition(pdrv);
 
 	return sdmmc_storage_read(storage, actual_sector, count, buff) ? RES_OK : RES_ERROR;
 }
@@ -102,6 +105,10 @@ DRESULT disk_write (
 	UINT count			/* Number of sectors to write */
 )
 {
+	if(!ensure_partition(pdrv)){
+		return RES_ERROR;
+	}
+
 	sdmmc_storage_t *storage = &sd_storage;
 	u32 actual_sector = sector;
 	switch(pdrv){
@@ -120,7 +127,6 @@ DRESULT disk_write (
 
 	}
 
-	ensure_partition(pdrv);
 
 	return sdmmc_storage_write(storage, actual_sector, count, (void*)buff) ? RES_OK : RES_ERROR;
 }
