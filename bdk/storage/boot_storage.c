@@ -4,6 +4,8 @@
 #include <storage/sd.h>
 #include <storage/emmc.h>
 #include <utils/types.h>
+#include <gfx_utils.h>
+#include <stdlib.h>
 
 #define DEV_INVALID 0xff
 
@@ -11,10 +13,10 @@ static FATFS boot_storage_fs;
 static BYTE drive = -1;
 
 static const char* drive_base_paths[] = {
-	[DRIVE_SD]        = XSTR(DRIVE_SD)        ":",
-	[DRIVE_BOOT1]     = XSTR(DRIVE_BOOT1)     ":",
-	[DRIVE_BOOT1_1MB] = XSTR(DRIVE_BOOT1_1MB) ":",
-	[DRIVE_EMMC]       = XSTR(DRIVE_EMMC)       ":",
+	[DRIVE_SD]         = "sd:",
+	[DRIVE_BOOT1]      = "boot1_:",
+	[DRIVE_BOOT1_1MB]  = "boot1_1mb:",
+	[DRIVE_EMMC]       = "emmc:",
 };
 
 static bool _is_eligible(){
@@ -78,6 +80,10 @@ void boot_storage_end(){
 	_boot_storage_end(true);
 }
 
+u8 boot_storage_get_drive(){
+	return drive;
+}
+
 static bool _boot_storage_mount(){
 	// may want to check sd card first and prioritize it
 
@@ -90,14 +96,17 @@ static bool _boot_storage_mount(){
 	static const BYTE emmc_drives[] = {DRIVE_BOOT1_1MB, DRIVE_BOOT1, DRIVE_EMMC}; 
 
 	for(BYTE i = 0; i < ARRAY_SIZE(emmc_drives); i++){
-		res = f_mount(&boot_storage_fs, drive_base_paths[i], true);
+		res = f_mount(&boot_storage_fs, drive_base_paths[emmc_drives[i]], true);
 		if(res == FR_OK){
+			gfx_printf("trying %s\n", drive_base_paths[emmc_drives[i]]);
 			res = f_chdrive(drive_base_paths[i]);
 			if(res == FR_OK && _is_eligible()){
-				drive = i;
+				gfx_printf("%s ok\n", drive_base_paths[emmc_drives[i]]);
+				drive = emmc_drives[i];
 				break;
 			}else{
-				f_mount(NULL, drive_base_paths[i],false);
+				gfx_printf("%s fail\n", drive_base_paths[emmc_drives[i]]);
+				f_mount(NULL, drive_base_paths[emmc_drives[i]],false);
 				res = FR_INVALID_DRIVE;
 			}
 		}
@@ -112,11 +121,14 @@ static bool _boot_storage_mount(){
 	}
 
 emmc_init_fail:
+	gfx_printf("trying %s\n", drive_base_paths[DRIVE_SD]);
 	if(!sd_initialize(false)){
+		gfx_printf("%s fail\n", drive_base_paths[DRIVE_SD]);
 		goto out;
 	}
 
 	if(!sd_mount()){
+		gfx_printf("%s fail\n", drive_base_paths[DRIVE_SD]);
 		sd_end();
 		goto out;
 	}
@@ -124,6 +136,7 @@ emmc_init_fail:
 	res = f_chdrive(drive_base_paths[DRIVE_SD]);
 
 	if(res == FR_OK && _is_eligible()){
+		gfx_printf("%s ok\n", drive_base_paths[DRIVE_SD]);
 		drive = DRIVE_SD;
 		return true;
 	}
@@ -137,18 +150,65 @@ out:
 bool boot_storage_mount(){
 	bool mounted = boot_storage_get_mounted();
 	bool initialized = boot_storage_get_initialized();
-	if(mounted && initialized){
-		return true;
-	}
-
+	bool res = mounted && initialized;
 	if(!mounted){
 		// not mounted. mounting will also initialize.
-		return _boot_storage_mount();
+		res = _boot_storage_mount();
+	}else if(!initialized){
+		res = _boot_storage_initialize();
 	}
 
-	if(!initialized){
-		return _boot_storage_initialize();
+	if(res){
+		res = f_chdrive(drive_base_paths[drive]) == FR_OK;
 	}
 
-	return true;
+	return res;
+}
+
+void *boot_storage_file_read(const char *path, u32 *fsize)
+{
+	FIL fp;
+	if (!boot_storage_get_mounted())
+		return NULL;
+
+	if (f_open(&fp, path, FA_READ) != FR_OK)
+		return NULL;
+
+	u32 size = f_size(&fp);
+	if (fsize)
+		*fsize = size;
+
+	void *buf = malloc(size);
+
+	if (f_read(&fp, buf, size, NULL) != FR_OK)
+	{
+		free(buf);
+		f_close(&fp);
+
+		return NULL;
+	}
+
+	f_close(&fp);
+
+	return buf;
+}
+
+int boot_storage_save_to_file(const void *buf, u32 size, const char *filename)
+{
+	FIL fp;
+	u32 res = 0;
+	if (!boot_storage_get_mounted())
+		return FR_DISK_ERR;
+
+	res = f_open(&fp, filename, FA_CREATE_ALWAYS | FA_WRITE);
+	if (res)
+	{
+		EPRINTFARGS("Error (%d) creating file\n%s.\n", res, filename);
+		return res;
+	}
+
+	f_write(&fp, buf, size, NULL);
+	f_close(&fp);
+
+	return 0;
 }

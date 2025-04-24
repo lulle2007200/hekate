@@ -199,7 +199,7 @@ bool sd_mount()
 	else
 	{
 		if (!sd_mounted)
-			res = f_mount(&sd_fs, XSTR(FF_DEV_SD) ":", 1); // Volume 0 is SD.
+			res = f_mount(&sd_fs, "sd:", 1); // Volume 0 is SD.
 		if (res == FR_OK)
 		{
 			sd_mounted = true;
@@ -227,7 +227,7 @@ static void _sd_deinit(bool deinit)
 	if (sd_init_done)
 	{
 		if (sd_mounted)
-			f_mount(NULL, XSTR(FF_DEV_SD) ":", 1); // Volume 0 is SD.
+			f_mount(NULL, "sd:", 1); // Volume 0 is SD.
 
 		if (deinit)
 		{
@@ -246,14 +246,30 @@ bool sd_is_gpt()
 	return sd_fs.part_type;
 }
 
+
 void *sd_file_read(const char *path, u32 *fsize)
 {
 	FIL fp;
 	if (!sd_get_card_mounted())
 		return NULL;
 
-	if (f_open(&fp, path, FA_READ) != FR_OK)
+	char *cwd = (char*)malloc(0x200);
+
+	if(f_getcwd(cwd, 0x200) != FR_OK){
+		free(cwd);
 		return NULL;
+	}
+
+	if(f_chdrive("sd:") != FR_OK){
+		free(cwd);
+		return NULL;
+	}
+
+	if (f_open(&fp, path, FA_READ) != FR_OK){
+		f_chdrive(cwd);
+		free(cwd);
+		return NULL;
+	}
 
 	u32 size = f_size(&fp);
 	if (fsize)
@@ -263,13 +279,17 @@ void *sd_file_read(const char *path, u32 *fsize)
 
 	if (f_read(&fp, buf, size, NULL) != FR_OK)
 	{
+		f_chdrive(cwd);
 		free(buf);
+		free(cwd);
 		f_close(&fp);
 
 		return NULL;
 	}
 
+	f_chdrive(cwd);
 	f_close(&fp);
+	free(cwd);
 
 	return buf;
 }
@@ -281,13 +301,33 @@ int sd_save_to_file(const void *buf, u32 size, const char *filename)
 	if (!sd_get_card_mounted())
 		return FR_DISK_ERR;
 
+	char *cwd = malloc(0x200);
+
+	res = f_getcwd(cwd, 0x200);
+	
+	if(res != FR_OK){
+		free(cwd);
+		return res;
+	}
+
+	res = f_chdrive("sd:");
+
+	if(res != FR_OK){
+		free(cwd);
+		return res;
+	}
+
 	res = f_open(&fp, filename, FA_CREATE_ALWAYS | FA_WRITE);
 	if (res)
 	{
 		EPRINTFARGS("Error (%d) creating file\n%s.\n", res, filename);
+		f_chdrive(cwd);
+		free(cwd);
 		return res;
 	}
 
+	f_chdrive(cwd);
+	free(cwd);
 	f_write(&fp, buf, size, NULL);
 	f_close(&fp);
 

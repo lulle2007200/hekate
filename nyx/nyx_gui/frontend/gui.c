@@ -29,6 +29,7 @@
 
 #include "../config.h"
 #include <libs/fatfs/ff.h>
+#include <storage/boot_storage.h>
 
 extern hekate_config h_cfg;
 extern nyx_config n_cfg;
@@ -187,7 +188,7 @@ static void _save_log_to_bmp(char *fname)
 	char path[0x80];
 	strcpy(path, "bootloader/screenshots");
 	s_printf(path + strlen(path), "/nyx%s_log.bmp", fname);
-	sd_save_to_file(bitmap, file_size, path);
+	boot_storage_save_to_file(bitmap, file_size, path);
 
 	free(bitmap);
 	free(fb);
@@ -271,7 +272,7 @@ static void _save_fb_to_bmp()
 	bmp->res_v    = 2834;
 	bmp->rsvd2    = 0;
 
-	sd_mount();
+	boot_storage_mount();
 
 	char path[0x80];
 
@@ -288,7 +289,7 @@ static void _save_fb_to_bmp()
 	s_printf(path + strlen(path), "/nyx%s.bmp", fname);
 
 	// Save screenshot and log.
-	int res = sd_save_to_file(bitmap, file_size, path);
+	int res = boot_storage_save_to_file(bitmap, file_size, path);
 	if (!res)
 		_save_log_to_bmp(fname);
 
@@ -651,7 +652,7 @@ void manual_system_maintenance(bool refresh)
 lv_img_dsc_t *bmp_to_lvimg_obj(const char *path)
 {
 	u32 fsize;
-	u8 *bitmap = sd_file_read(path, &fsize);
+	u8 *bitmap = boot_storage_file_read(path, &fsize);
 	if (!bitmap)
 		return NULL;
 
@@ -1387,8 +1388,9 @@ static lv_res_t _create_mbox_payloads(lv_obj_t *btn)
 	lv_obj_set_size(list, LV_HOR_RES * 3 / 7, LV_VER_RES * 3 / 7);
 	lv_list_set_single_mode(list, true);
 
-	if (!sd_mount())
+	if (!boot_storage_mount())
 	{
+		// TODO: may not be SD, change error
 		lv_mbox_set_text(mbox, "#FFDD00 Failed to init SD!#");
 
 		goto out_end;
@@ -1699,7 +1701,7 @@ static lv_res_t _create_window_home_launch(lv_obj_t *btn)
 	u32 curr_btn_idx = 0; // Active buttons.
 	LIST_INIT(ini_sections);
 
-	if (!sd_mount())
+	if (!boot_storage_mount())
 		goto failed_sd_mount;
 
 	// Check if we use custom system icons.
@@ -1895,7 +1897,7 @@ failed_sd_mount:
 	if (curr_btn_idx < 1)
 		no_boot_entries = true;
 
-	sd_unmount();
+	boot_storage_unmount();
 
 	free(tmp_path);
 
@@ -2058,7 +2060,7 @@ static lv_res_t _save_options_action(lv_obj_t *btn)
 
 	int res = 0;
 
-	if (sd_mount())
+	if (boot_storage_mount())
 		res = !create_config_entry();
 
 	if (res)
@@ -2070,7 +2072,7 @@ static lv_res_t _save_options_action(lv_obj_t *btn)
 
 	nyx_options_clear_ini_changes_made();
 
-	sd_unmount();
+	boot_storage_unmount();
 
 	return LV_RES_OK;
 }

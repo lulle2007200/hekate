@@ -13,4 +13,9 @@ void boot_storage_end();
 bool boot_storage_get_mounted();
 bool boot_storage_get_initialized();
 
+void *boot_storage_file_read(const char *path, u32 *fsize);
+int boot_storage_save_to_file(const void *buf, u32 size, const char *filename);
+
+u8 boot_storage_get_drive();
+
 #endif

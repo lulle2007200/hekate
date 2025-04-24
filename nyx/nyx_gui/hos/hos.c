@@ -23,6 +23,7 @@
 #include <bdk.h>
 
 #include "hos.h"
+#include <storage/boot_storage.h>
 #include "../config.h"
 
 extern hekate_config h_cfg;
@@ -393,7 +394,7 @@ int hos_keygen(void *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt)
 		 */
 
 		// Use custom TSEC Hovi Keygen firmware.
-		tsec_ctxt->fw = sd_file_read("bootloader/sys/thk.bin", NULL);
+		tsec_ctxt->fw = boot_storage_file_read("bootloader/sys/thk.bin", NULL);
 		if (!tsec_ctxt->fw)
 		{
 			EPRINTF("\nFailed to load thk.bin");

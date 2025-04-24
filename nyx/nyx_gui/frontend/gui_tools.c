@@ -15,6 +15,10 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <fatfs_cfg.h>
+#include <libs/lvgl/lv_core/lv_obj.h>
+#include <libs/lvgl/lv_objx/lv_btn.h>
+#include <libs/lvgl/lv_objx/lv_label.h>
 #include <stdlib.h>
 
 #include <bdk.h>
@@ -29,6 +33,9 @@
 #include "../hos/pkg2.h"
 #include "../hos/hos.h"
 #include <libs/fatfs/ff.h>
+#include <storage/boot_storage.h>
+#include <storage/sdmmc.h>
+#include <string.h>
 
 extern volatile boot_cfg_t *b_cfg;
 extern hekate_config h_cfg;
@@ -441,6 +448,45 @@ static lv_res_t _action_ums_emmc_boot0(lv_obj_t *btn)
 	return LV_RES_OK;
 }
 
+static lv_res_t _action_ums_boot_storage(lv_obj_t *btn){
+	if(!nyx_emmc_check_battery_enough()){
+		return LV_RES_OK;
+	}
+
+	boot_storage_mount();
+
+	u8 drive = boot_storage_get_drive();
+
+	usb_ctxt_t usbs;
+	usbs.type = drive == DRIVE_SD ? MMC_SD : MMC_EMMC;
+	switch(drive){
+	case DRIVE_EMMC:
+		usbs.partition = EMMC_GPP + 1;
+		break;
+	case DRIVE_BOOT1:
+	case DRIVE_BOOT1_1MB:
+		usbs.partition = EMMC_BOOT1 + 1;
+		break;
+	case DRIVE_SD:
+		usbs.partition = 0;
+		break;
+	default:
+		boot_storage_unmount();
+		return LV_RES_OK;
+	}
+	usbs.offset = drive == DRIVE_BOOT1_1MB ? (0x100000 / 0x200) : 0;
+	usbs.sectors = 0;
+	usbs.ro = false;
+	usbs.system_maintenance = &manual_system_maintenance;
+	usbs.set_text = &usb_gadget_set_text;
+
+	_create_mbox_ums(&usbs);
+
+	boot_storage_unmount();
+
+	return LV_RES_OK;
+}
+
 static lv_res_t _action_ums_emmc_boot1(lv_obj_t *btn)
 {
 	if (!nyx_emmc_check_battery_enough())
@@ -487,6 +533,7 @@ static lv_res_t _action_ums_emuemmc_boot0(lv_obj_t *btn)
 	usb_ctxt_t usbs;
 
 	int error = !sd_mount();
+	error &= boot_storage_mount();
 	if (!error)
 	{
 		emummc_cfg_t emu_info;
@@ -509,6 +556,7 @@ static lv_res_t _action_ums_emuemmc_boot0(lv_obj_t *btn)
 			free(emu_info.nintendo_path);
 	}
 	sd_unmount();
+	boot_storage_unmount();
 
 	if (error)
 		_create_mbox_ums_error(error);
@@ -534,6 +582,7 @@ static lv_res_t _action_ums_emuemmc_boot1(lv_obj_t *btn)
 	usb_ctxt_t usbs;
 
 	int error = !sd_mount();
+	error &= boot_storage_mount();
 	if (!error)
 	{
 		emummc_cfg_t emu_info;
@@ -556,6 +605,7 @@ static lv_res_t _action_ums_emuemmc_boot1(lv_obj_t *btn)
 			free(emu_info.nintendo_path);
 	}
 	sd_unmount();
+	boot_storage_unmount();
 
 	if (error)
 		_create_mbox_ums_error(error);
@@ -581,6 +631,7 @@ static lv_res_t _action_ums_emuemmc_gpp(lv_obj_t *btn)
 	usb_ctxt_t usbs;
 
 	int error = !sd_mount();
+	error &= boot_storage_mount();
 	if (!error)
 	{
 		emummc_cfg_t emu_info;
@@ -613,6 +664,7 @@ static lv_res_t _action_ums_emuemmc_gpp(lv_obj_t *btn)
 			free(emu_info.nintendo_path);
 	}
 	sd_unmount();
+	boot_storage_unmount();
 
 	if (error)
 		_create_mbox_ums_error(error);
@@ -718,11 +770,25 @@ static lv_res_t _create_window_usb_tools(lv_obj_t *parent)
 	lv_obj_t *label_txt2 = lv_label_create(h1, NULL);
 	lv_label_set_recolor(label_txt2, true);
 	lv_label_set_static_text(label_txt2,
-		"Allows you to mount the SD Card to a PC/Phone.\n"
+		"Allows you to mount the SD Card or boot storage to a PC/Phone.\n"
 		"#C7EA46 All operating systems are supported. Access is# #FF8000 Read/Write.#");
 
 	lv_obj_set_style(label_txt2, &hint_small_style);
 	lv_obj_align(label_txt2, btn1, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 3);
+
+	// Create Boot Storage UMS button
+	lv_obj_t *btn_boot_strg = lv_btn_create(h1, btn1);
+	label_btn = lv_label_create(btn_boot_strg, NULL);
+	lv_label_set_text(label_btn, SYMBOL_SD " Boot Storage");
+	lv_obj_align(btn_boot_strg, btn1, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 10, 0);
+	lv_btn_set_action(btn_boot_strg, LV_BTN_ACTION_CLICK, _action_ums_boot_storage);
+	
+	if(!boot_storage_mount()){
+		lv_obj_set_click(btn_boot_strg, false);
+		lv_btn_set_state(btn_boot_strg, LV_BTN_STATE_INA);
+	}
+	boot_storage_unmount();
+
 
 	// Create RAW GPP button.
 	lv_obj_t *btn_gpp = lv_btn_create(h1, btn1);
@@ -927,6 +993,8 @@ out:
 	return res;
 }
 
+
+// TODO: emusd
 static lv_res_t _create_window_unset_abit_tool(lv_obj_t *btn)
 {
 	lv_obj_t *win = nyx_create_standard_window(SYMBOL_COPY" Fix Archive Bit (All folders)");
@@ -957,7 +1025,8 @@ static lv_res_t _create_window_unset_abit_tool(lv_obj_t *btn)
 		lv_obj_t * lb_val = lv_label_create(val, lb_desc);
 
 		char *path = malloc(0x1000);
-		path[0] = 0;
+		strcpy(path, "sd:");
+		// path[0] = 0;
 
 		lv_label_set_text(lb_val, "");
 		lv_obj_set_width(lb_val, lv_obj_get_width(val));
@@ -1135,8 +1204,9 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 	lv_label_set_recolor(lb_desc, true);
 	lv_obj_set_width(lb_desc, lv_obj_get_width(desc));
 
-	if (!sd_mount())
+	if (!boot_storage_mount())
 	{
+		// may not be sd, fix error
 		lv_label_set_text(lb_desc, "#FFDD00 Failed to init SD!#");
 
 		goto out_end;
@@ -1180,7 +1250,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	// Dump package1 in its encrypted state.
 	emmcsn_path_impl(path, "/pkg1", "pkg1_enc.bin", &emmc_storage);
-	bool res = sd_save_to_file(pkg1, BOOTLOADER_SIZE, path);
+	bool res = boot_storage_save_to_file(pkg1, BOOTLOADER_SIZE, path);
 
 	// Exit if unknown.
 	if (!pkg1_id)
@@ -1245,7 +1315,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 		// Dump package1.1.
 		emmcsn_path_impl(path, "/pkg1", "pkg1_decr.bin", &emmc_storage);
-		if (sd_save_to_file(pkg1, SZ_256K, path))
+		if (boot_storage_save_to_file(pkg1, SZ_256K, path))
 			goto out_free;
 		strcat(txt_buf, "pkg1 dumped to pkg1_decr.bin\n");
 		lv_label_set_text(lb_desc, txt_buf);
@@ -1253,7 +1323,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 		// Dump nxbootloader.
 		emmcsn_path_impl(path, "/pkg1", "nxloader.bin", &emmc_storage);
-		if (sd_save_to_file(loader, hdr_pk11->ldr_size, path))
+		if (boot_storage_save_to_file(loader, hdr_pk11->ldr_size, path))
 			goto out_free;
 		strcat(txt_buf, "NX Bootloader dumped to nxloader.bin\n");
 		lv_label_set_text(lb_desc, txt_buf);
@@ -1261,7 +1331,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 		// Dump secmon.
 		emmcsn_path_impl(path, "/pkg1", "secmon.bin", &emmc_storage);
-		if (sd_save_to_file(secmon, hdr_pk11->sm_size, path))
+		if (boot_storage_save_to_file(secmon, hdr_pk11->sm_size, path))
 			goto out_free;
 		strcat(txt_buf, "Secure Monitor dumped to secmon.bin\n");
 		lv_label_set_text(lb_desc, txt_buf);
@@ -1269,7 +1339,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 		// Dump warmboot.
 		emmcsn_path_impl(path, "/pkg1", "warmboot.bin", &emmc_storage);
-		if (sd_save_to_file(warmboot, hdr_pk11->wb_size, path))
+		if (boot_storage_save_to_file(warmboot, hdr_pk11->wb_size, path))
 			goto out_free;
 		// If T210B01, save a copy of decrypted warmboot binary also.
 		if (h_cfg.t210b01)
@@ -1279,7 +1349,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 			se_aes_crypt_cbc(13, DECRYPT, warmboot + 0x330, hdr_pk11->wb_size - 0x330,
 				warmboot + 0x330, hdr_pk11->wb_size - 0x330);
 			emmcsn_path_impl(path, "/pkg1", "warmboot_dec.bin", &emmc_storage);
-			if (sd_save_to_file(warmboot, hdr_pk11->wb_size, path))
+			if (boot_storage_save_to_file(warmboot, hdr_pk11->wb_size, path))
 				goto out_free;
 		}
 		strcat(txt_buf, "Warmboot dumped to warmboot.bin\n\n");
@@ -1311,7 +1381,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	// Dump encrypted package2.
 	emmcsn_path_impl(path, "/pkg2", "pkg2_encr.bin", &emmc_storage);
-	res = sd_save_to_file(pkg2, pkg2_size, path);
+	res = boot_storage_save_to_file(pkg2, pkg2_size, path);
 
 	// Decrypt package2 and parse KIP1 blobs in INI1 section.
 	pkg2_hdr_t *pkg2_hdr = pkg2_decrypt(pkg2, kb);
@@ -1345,7 +1415,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	// Dump pkg2.1.
 	emmcsn_path_impl(path, "/pkg2", "pkg2_decr.bin", &emmc_storage);
-	if (sd_save_to_file(pkg2, pkg2_hdr->sec_size[PKG2_SEC_KERNEL] + pkg2_hdr->sec_size[PKG2_SEC_INI1], path))
+	if (boot_storage_save_to_file(pkg2, pkg2_hdr->sec_size[PKG2_SEC_KERNEL] + pkg2_hdr->sec_size[PKG2_SEC_INI1], path))
 		goto out;
 	strcat(txt_buf, "pkg2 dumped to pkg2_decr.bin\n");
 	lv_label_set_text(lb_desc, txt_buf);
@@ -1353,7 +1423,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	// Dump kernel.
 	emmcsn_path_impl(path, "/pkg2", "kernel.bin", &emmc_storage);
-	if (sd_save_to_file(pkg2_hdr->data, pkg2_hdr->sec_size[PKG2_SEC_KERNEL], path))
+	if (boot_storage_save_to_file(pkg2_hdr->data, pkg2_hdr->sec_size[PKG2_SEC_KERNEL], path))
 		goto out;
 	strcat(txt_buf, "Kernel dumped to kernel.bin\n");
 	lv_label_set_text(lb_desc, txt_buf);
@@ -1377,7 +1447,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 
 	pkg2_ini1_t *ini1 = (pkg2_ini1_t *)(pkg2_hdr->data + ini1_off);
 	emmcsn_path_impl(path, "/pkg2", "ini1.bin", &emmc_storage);
-	if (sd_save_to_file(ini1, ini1_size, path))
+	if (boot_storage_save_to_file(ini1, ini1_size, path))
 		goto out;
 
 	strcat(txt_buf, "INI1 dumped to ini1.bin\n\n");
@@ -1404,7 +1474,7 @@ static lv_res_t _create_window_dump_pk12_tool(lv_obj_t *btn)
 		}
 
 		emmcsn_path_impl(path, "/pkg2/ini1", filename, &emmc_storage);
-		if (sd_save_to_file(kip1, kip1_size, path))
+		if (boot_storage_save_to_file(kip1, kip1_size, path))
 		{
 			free(kip_buffer);
 			goto out;
@@ -1429,6 +1499,7 @@ out_free:
 	free(txt_buf);
 	emmc_end();
 	sd_unmount();
+	boot_storage_unmount();
 
 	if (kb >= HOS_KB_VERSION_620)
 		se_aes_key_clear(8);

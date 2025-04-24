@@ -14,6 +14,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <libs/fatfs/ff.h>
 #include <stdlib.h>
 
 #include <bdk.h>
@@ -23,6 +24,8 @@
 #include "gui_tools_partition_manager.h"
 #include <libs/fatfs/diskio.h>
 #include <libs/lvgl/lvgl.h>
+#include <storage/boot_storage.h>
+#include <storage/sd.h>
 
 #define AU_ALIGN_SECTORS 0x8000 // 16MB.
 #define AU_ALIGN_BYTES   (AU_ALIGN_SECTORS * SD_BLOCKSIZE)
@@ -536,7 +539,7 @@ static lv_res_t _action_delete_linux_installer_files(lv_obj_t * btns, const char
 	{
 		char path[128];
 
-		sd_mount();
+		boot_storage_mount();
 
 		strcpy(path, "switchroot/install/l4t.");
 
@@ -562,7 +565,7 @@ static lv_res_t _action_delete_linux_installer_files(lv_obj_t * btns, const char
 			idx++;
 		}
 
-		sd_unmount();
+		boot_storage_unmount();
 	}
 
 	return LV_RES_INV;
@@ -616,6 +619,7 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_top(mbox, true);
 
+	boot_storage_mount();
 	sd_mount();
 
 	int res = 0;
@@ -761,6 +765,7 @@ exit:
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 
 	sd_unmount();
+	boot_storage_unmount();
 
 	return LV_RES_INV;
 }
@@ -876,7 +881,7 @@ static lv_res_t _action_check_flash_linux(lv_obj_t *btn)
 
 	manual_system_maintenance(true);
 
-	sd_mount();
+	boot_storage_mount();
 
 	// Check if L4T image exists.
 	strcpy(path, "switchroot/install/l4t.00");
@@ -964,7 +969,7 @@ error:
 exit:
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 
-	sd_unmount();
+	boot_storage_unmount();
 
 	return LV_RES_OK;
 }
@@ -1038,6 +1043,7 @@ static lv_res_t _action_flash_android_data(lv_obj_t * btns, const char * txt)
 	manual_system_maintenance(true);
 
 	sd_mount();
+	boot_storage_mount();
 
 	// Read main GPT.
 	sdmmc_storage_read(&sd_storage, 1, sizeof(gpt_t) >> 9, gpt);
@@ -1078,7 +1084,7 @@ static lv_res_t _action_flash_android_data(lv_obj_t * btns, const char * txt)
 	if (offset_sct && size_sct)
 	{
 		u32 file_size = 0;
-		u8 *buf = sd_file_read(path, &file_size);
+		u8 *buf = boot_storage_file_read(path, &file_size);
 
 		if (file_size % 0x200)
 		{
@@ -1142,7 +1148,7 @@ boot_img_not_found:
 	if (offset_sct && size_sct)
 	{
 		u32 file_size = 0;
-		u8 *buf = sd_file_read(path, &file_size);
+		u8 *buf = boot_storage_file_read(path, &file_size);
 
 		if (file_size % 0x200)
 		{
@@ -1204,7 +1210,7 @@ recovery_not_found:
 	if (offset_sct && size_sct)
 	{
 		u32 file_size = 0;
-		u8 *buf = sd_file_read(path, &file_size);
+		u8 *buf = boot_storage_file_read(path, &file_size);
 
 		if (file_size % 0x200)
 		{
@@ -1266,6 +1272,7 @@ error:
 	free(gpt);
 
 	sd_unmount();
+	boot_storage_unmount();
 
 	return LV_RES_INV;
 }
@@ -1419,6 +1426,9 @@ static int _backup_and_restore_files(bool backup, lv_obj_t **labels)
 
 static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 {
+	char cwd[0x200];
+	f_getcwd(cwd, sizeof(cwd));
+
 	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
 	lv_obj_set_style(dark_bg, &mbox_darken);
 	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
@@ -1522,7 +1532,7 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 		goto error;
 	}
 
-	f_mount(NULL, "sd:", 1); // Unmount SD card.
+	sd_unmount();
 
 	lv_label_set_text(lbl_status, "#00DDFF Status:# Formatting FAT32 partition...");
 	lv_label_set_text(lbl_paths[0], "Please wait...");
@@ -1593,7 +1603,7 @@ mkfs_no_error:
 	free(buf);
 
 	// Remount sd card as it was unmounted from formatting it.
-	f_mount(&sd_fs, "sd:", 1); // Mount SD card.
+	sd_mount();
 
 	lv_label_set_text(lbl_status, "#00DDFF Status:# Restoring files...");
 	manual_system_maintenance(true);
@@ -1610,10 +1620,10 @@ mkfs_no_error:
 	}
 
 	f_mount(NULL, "ram:", 1); // Unmount ramdisk.
-	f_chdrive("sd:");
+	f_chdrive(cwd);
 
 	// Set Volume label.
-	f_setlabel("0:SWITCH SD");
+	f_setlabel("sd:SWITCH SD");
 
 	lv_label_set_text(lbl_status, "#00DDFF Status:# Flashing partition table...");
 	lv_label_set_text(lbl_paths[0], "Please wait...");
@@ -1665,7 +1675,7 @@ mkfs_no_error:
 	goto out;
 
 error:
-	f_chdrive("sd:");
+	f_chdrive(cwd);
 
 out:
 	lv_obj_del(lbl_paths[0]);

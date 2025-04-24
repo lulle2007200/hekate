@@ -9,15 +9,43 @@
 /* storage control modules to the FatFs module with a defined API.       */
 /*-----------------------------------------------------------------------*/
 
+#include <storage/emmc.h>
 #include <string.h>
 
 #include <bdk.h>
 
 #include <libs/fatfs/diskio.h>	/* FatFs lower layer API */
+#include <fatfs_cfg.h>
 
 static u32 sd_rsvd_sectors = 0;
 static u32 ramdisk_sectors = 0;
 static u32 emummc_sectors = 0;
+
+static bool ensure_partition(BYTE pdrv){
+	u8 part;
+	switch(pdrv){
+	case DRIVE_BOOT1:
+	case DRIVE_BOOT1_1MB:
+		part = EMMC_BOOT1;
+		break;
+	case DRIVE_EMMC:
+		part = EMMC_GPP;
+		break;
+	case DRIVE_SD:
+	case DRIVE_RAM:
+	case DRIVE_BIS:
+	case DRIVE_EMU:
+		return true;
+	default:
+		return false;
+	}
+
+	if(emmc_storage.partition != part){
+		return emmc_set_partition(part);
+	}
+
+	return true;
+}
 
 /*-----------------------------------------------------------------------*/
 /* Get Drive Status                                                      */
@@ -49,6 +77,10 @@ DRESULT disk_read (
 	UINT count		/* Number of sectors to read */
 )
 {
+	if(!ensure_partition(pdrv)){
+		return RES_ERROR;
+	}
+
 	switch (pdrv)
 	{
 	case DRIVE_SD:
@@ -60,6 +92,10 @@ DRESULT disk_read (
 	case DRIVE_BIS:
 	case DRIVE_EMU:
 		return nx_emmc_bis_read(sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+	case DRIVE_BOOT1_1MB:
+		return sdmmc_storage_read(&emmc_storage, sector + (0x100000 / 512), count, buff) ? RES_OK : RES_ERROR;
+	case DRIVE_BOOT1:
+		return sdmmc_storage_read(&emmc_storage, sector, count, buff) ? RES_OK : RES_ERROR;
 	}
 
 	return RES_ERROR;
@@ -75,6 +111,10 @@ DRESULT disk_write (
 	UINT count			/* Number of sectors to write */
 )
 {
+	if(!ensure_partition(pdrv)){
+		return RES_ERROR;
+	}
+
 	switch (pdrv)
 	{
 	case DRIVE_SD:
@@ -86,6 +126,10 @@ DRESULT disk_write (
 		return RES_WRPRT;
 	case DRIVE_EMU:
 		return nx_emmc_bis_write(sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+	case DRIVE_BOOT1_1MB:
+		return sdmmc_storage_write(&emmc_storage, sector + (0x100000 / 512), count, (void*)buff) ? RES_OK : RES_ERROR;
+	case DRIVE_BOOT1:
+		return sdmmc_storage_write(&emmc_storage, sector, count, (void*)buff) ? RES_OK : RES_ERROR;
 	}
 
 	return RES_ERROR;

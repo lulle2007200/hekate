@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <storage/boot_storage.h>
 #include <string.h>
 
 #include <bdk.h>
@@ -84,7 +85,7 @@ typedef struct _fss_content_t
 
 static void _fss_update_r2p()
 {
-	u8 *r2p_payload = sd_file_read("atmosphere/reboot_payload.bin", NULL);
+	u8 *r2p_payload = boot_storage_file_read("atmosphere/reboot_payload.bin", NULL);
 
 	is_ipl_updated(r2p_payload, "atmosphere/reboot_payload.bin", h_cfg.updater2p ? true : false);
 

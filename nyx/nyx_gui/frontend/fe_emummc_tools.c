@@ -18,6 +18,7 @@
 
 //! fix the dram stuff and the pop ups
 
+#include <storage/boot_storage.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -78,7 +79,7 @@ void load_emummc_cfg(emummc_cfg_t *emu_info)
 
 void save_emummc_cfg(u32 part_idx, u32 sector_start, const char *path)
 {
-	sd_mount();
+	boot_storage_mount();
 
 	char lbuf[16];
 	FIL fp;
@@ -381,7 +382,7 @@ void dump_emummc_file(emmc_tool_gui_t *gui)
 	manual_system_maintenance(true);
 
 	// Get SD Card free space for file based emuMMC.
-	f_getfree("", &sd_fs.free_clst, NULL);
+	f_getfree("sd:", &sd_fs.free_clst, NULL);
 
 	if (!emmc_initialize(false))
 	{
@@ -392,8 +393,8 @@ void dump_emummc_file(emmc_tool_gui_t *gui)
 	int i = 0;
 	char sdPath[OUT_FILENAME_SZ];
 	// Create Restore folders, if they do not exist.
-	f_mkdir("emuMMC");
-	strcpy(sdPath, "emuMMC/SD");
+	f_mkdir("sd:emuMMC");
+	strcpy(sdPath, "sd:emuMMC/SD");
 	base_len = strlen(sdPath);
 
 	for (int j = 0; j < 100; j++)
@@ -854,6 +855,9 @@ void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 r
 
 	manual_system_maintenance(true);
 
+	// TODO: check result of boot storage mount
+	boot_storage_mount(); 
+
 	if (!sd_mount())
 	{
 		lv_label_set_text(gui->label_info, "#FFDD00 Failed to init SD!#");
@@ -877,8 +881,8 @@ void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 r
 	int i = 0;
 	char sdPath[OUT_FILENAME_SZ];
 	// Create Restore folders, if they do not exist.
-	f_mkdir("emuMMC");
-	s_printf(sdPath, "emuMMC/RAW%d", part_idx);
+	f_mkdir("sd:emuMMC");
+	s_printf(sdPath, "sd:emuMMC/RAW%d", part_idx);
 	f_mkdir(sdPath);
 	strcat(sdPath, "/");
 	strcpy(gui->base_path, sdPath);

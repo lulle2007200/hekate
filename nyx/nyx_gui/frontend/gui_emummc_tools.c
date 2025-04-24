@@ -22,6 +22,8 @@
 #include "fe_emummc_tools.h"
 #include "gui_tools_partition_manager.h"
 #include <libs/fatfs/ff.h>
+#include <storage/boot_storage.h>
+#include <storage/sd.h>
 
 extern char *emmcsn_path_impl(char *path, char *sub_dir, char *filename, sdmmc_storage_t *storage);
 
@@ -407,7 +409,7 @@ static void _migrate_sd_raw_based()
 {
 	mbr_ctx.sector_start = 2;
 
-	sd_mount();
+	boot_storage_mount();
 	f_mkdir("emuMMC");
 	f_mkdir("emuMMC/ER00");
 
@@ -419,7 +421,7 @@ static void _migrate_sd_raw_based()
 
 	save_emummc_cfg(1, mbr_ctx.sector_start, "emuMMC/ER00");
 	_create_emummc_migrated_mbox();
-	sd_unmount();
+	boot_storage_unmount();
 }
 
 static void _migrate_sd_raw_emummc_based()
@@ -427,6 +429,7 @@ static void _migrate_sd_raw_emummc_based()
 	char *tmp = (char *)malloc(0x80);
 	s_printf(tmp, "emuMMC/RAW%d", mbr_ctx.part_idx);
 
+	boot_storage_mount();
 	sd_mount();
 	f_mkdir("emuMMC");
 	f_mkdir(tmp);
@@ -447,35 +450,40 @@ static void _migrate_sd_raw_emummc_based()
 	_create_emummc_migrated_mbox();
 	free(tmp);
 
+	boot_storage_unmount();
 	sd_unmount();
 }
 
 static void _migrate_sd_file_based()
 {
 	sd_mount();
+	boot_storage_mount();
+	f_mkdir("sd:emuMMC");
+	f_mkdir("sd:emuMMC/EF00");
+
+	f_rename("sd:Emutendo", "sd:emuMMC/EF00/Nintendo");
+	FIL fp;
+
 	f_mkdir("emuMMC");
 	f_mkdir("emuMMC/EF00");
-
-	f_rename("Emutendo", "emuMMC/EF00/Nintendo");
-	FIL fp;
 	f_open(&fp, "emuMMC/EF00/file_based", FA_CREATE_ALWAYS | FA_WRITE);
 	f_close(&fp);
 
 	char *path = (char *)malloc(128);
 	char *path2 = (char *)malloc(128);
-	s_printf(path, "%c%c%c%c%s", 's', 'x', 'o', 's', "/emunand");
-	f_rename(path, "emuMMC/EF00/eMMC");
+	s_printf(path, "sd:%c%c%c%c%s", 's', 'x', 'o', 's', "/emunand");
+	f_rename(path, "sd:emuMMC/EF00/eMMC");
 
 	for (int i = 0; i < 2; i++)
 	{
-		s_printf(path, "emuMMC/EF00/eMMC/boot%d.bin", i);
-		s_printf(path2, "emuMMC/EF00/eMMC/BOOT%d", i);
+		s_printf(path, "sd:emuMMC/EF00/eMMC/boot%d.bin", i);
+		s_printf(path2, "sd:emuMMC/EF00/eMMC/BOOT%d", i);
 		f_rename(path, path2);
 	}
 	for (int i = 0; i < 8; i++)
 	{
-		s_printf(path, "emuMMC/EF00/eMMC/full.%02d.bin", i);
-		s_printf(path2, "emuMMC/EF00/eMMC/%02d", i);
+		s_printf(path, "sd:emuMMC/EF00/eMMC/full.%02d.bin", i);
+		s_printf(path2, "sd:emuMMC/EF00/eMMC/%02d", i);
 		f_rename(path, path2);
 	}
 
@@ -485,6 +493,7 @@ static void _migrate_sd_file_based()
 	save_emummc_cfg(0, 0, "emuMMC/EF00");
 	_create_emummc_migrated_mbox();
 	sd_unmount();
+	boot_storage_unmount();
 }
 
 static void _migrate_sd_backup_file_based()
@@ -495,9 +504,11 @@ static void _migrate_sd_backup_file_based()
 	char *backup_file_path = (char *)malloc(128);
 
 	sd_mount();
+	boot_storage_mount();
+	f_mkdir("sd:emuMMC");
 	f_mkdir("emuMMC");
 
-	strcpy(emu_path, "emuMMC/BK");
+	strcpy(emu_path, "sd:emuMMC/BK");
 	u32 base_len = strlen(emu_path);
 
 	for (int j = 0; j < 100; j++)
@@ -509,13 +520,14 @@ static void _migrate_sd_backup_file_based()
 	base_len = strlen(emu_path);
 
 	f_mkdir(emu_path);
+	f_mkdir(emu_path + 3);
 	strcat(emu_path, "/eMMC");
 	f_mkdir(emu_path);
 
 	FIL fp;
 	// Create file based flag.
 	strcpy(emu_path + base_len, "/file_based");
-	f_open(&fp, "emuMMC/BK00/file_based", FA_CREATE_ALWAYS | FA_WRITE);
+	f_open(&fp, (emu_path + 3), FA_CREATE_ALWAYS | FA_WRITE);
 	f_close(&fp);
 
 	if (!emummc_backup)
@@ -523,6 +535,7 @@ static void _migrate_sd_backup_file_based()
 	else
 		emmcsn_path_impl(backup_path, "/emummc", "", NULL);
 
+	// TODO: f_rename wont work if src/dst are on different drives 
 	// Move BOOT0.
 	s_printf(backup_file_path, "%s/BOOT0", backup_path);
 	strcpy(emu_path + base_len, "/eMMC/BOOT0");
@@ -565,6 +578,7 @@ static void _migrate_sd_backup_file_based()
 	save_emummc_cfg(0, 0, "emuMMC/BK00");
 	_create_emummc_migrated_mbox();
 	sd_unmount();
+	boot_storage_unmount();
 }
 
 static lv_res_t _create_emummc_mig1_action(lv_obj_t * btns, const char * txt)
@@ -826,7 +840,7 @@ static lv_res_t _create_mbox_emummc_migrate(lv_obj_t *btn)
 			em_raw = true;
 	}
 
-	s_printf(path_buf, "%c%c%c%c%s", 's', 'x', 'o','s', "/emunand/boot0.bin");
+	s_printf(path_buf, "sd:%c%c%c%c%s", 's', 'x', 'o','s', "/emunand/boot0.bin");
 
 	if (!f_stat(path_buf, NULL))
 		em_file = true;
@@ -970,6 +984,7 @@ static lv_res_t _save_file_emummc_cfg_action(lv_obj_t *btn)
 	save_emummc_cfg(0, 0, lv_list_get_btn_text(btn));
 	_create_emummc_saved_mbox();
 	sd_unmount();
+	boot_storage_unmount();
 
 	return LV_RES_INV;
 }
@@ -1203,12 +1218,12 @@ lv_res_t create_win_emummc_tools(lv_obj_t *btn)
 	emummc_manage_window = win;
 	emummc_tools = (void *)create_win_emummc_tools;
 
-	sd_mount();
+	boot_storage_mount();
 
 	emummc_cfg_t emu_info;
 	load_emummc_cfg(&emu_info);
 
-	sd_unmount();
+	boot_storage_unmount();
 
 	static lv_style_t h_style;
 	lv_style_copy(&h_style, &lv_style_transp);

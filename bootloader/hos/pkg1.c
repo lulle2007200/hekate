@@ -17,6 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <storage/boot_storage.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -387,7 +388,7 @@ int pkg1_warmboot_config(void *hos_ctxt, u32 warmboot_base, u32 fuses_fw, u8 kb)
 					_warmboot_filename(path, burnt_fuses);
 					if (!f_stat(path, NULL))
 					{
-						ctxt->warmboot = sd_file_read(path, &ctxt->warmboot_size);
+						ctxt->warmboot = boot_storage_file_read(path, &ctxt->warmboot_size);
 						burnt_fuses = tmp_fuses;
 						break;
 					}

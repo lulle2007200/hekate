@@ -410,7 +410,7 @@ int hos_keygen(void *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt, bool stock, bool i
 		 */
 
 		// Use custom TSEC Hovi Keygen firmware.
-		tsec_ctxt->fw = sd_file_read("bootloader/sys/thk.bin", NULL);
+		tsec_ctxt->fw = boot_storage_file_read("bootloader/sys/thk.bin", NULL);
 		if (!tsec_ctxt->fw)
 		{
 			_hos_crit_error("\nFailed to load thk.bin");

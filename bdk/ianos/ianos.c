@@ -15,6 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <storage/boot_storage.h>
 #include <string.h>
 
 #include "ianos.h"
@@ -75,7 +76,7 @@ uintptr_t ianos_loader(char *path, elfType_t type, void *moduleConfig)
 	uintptr_t epaddr = 0;
 
 	// Read library.
-	fileBuf = sd_file_read(path, NULL);
+	fileBuf = boot_storage_file_read(path, NULL);
 
 	if (!fileBuf)
 		goto out;

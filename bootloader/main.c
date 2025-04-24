@@ -612,7 +612,7 @@ out:
 
 static void _nyx_load_run()
 {
-	u8 *nyx = sd_file_read("bootloader/sys/nyx.bin", NULL);
+	u8 *nyx = boot_storage_file_read("bootloader/sys/nyx.bin", NULL);
 	if (!nyx)
 		return;
 
@@ -914,11 +914,11 @@ skip_list:
 
 		// Check if user set custom logo path at the boot entry.
 		if (bootlogoCustomEntry)
-			bitmap = (u8 *)sd_file_read(bootlogoCustomEntry, &fsize);
+			bitmap = (u8 *)boot_storage_file_read(bootlogoCustomEntry, &fsize);
 
 		// Custom entry bootlogo not found, trying default custom one.
 		if (!bitmap)
-			bitmap = (u8 *)sd_file_read("bootloader/bootlogo.bmp", &fsize);
+			bitmap = (u8 *)boot_storage_file_read("bootloader/bootlogo.bmp", &fsize);
 
 		if (bitmap)
 		{

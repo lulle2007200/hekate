@@ -15,6 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <storage/boot_storage.h>
 #include <string.h>
 
 #include <bdk.h>
@@ -382,7 +383,7 @@ static int _kipm_inject(const char *kipm_path, char *target_name, pkg2_kip1_info
 	if (!strcmp((char *)ki->kip1->name, target_name))
 	{
 		u32 size = 0;
-		u8 *kipm_data = (u8 *)sd_file_read(kipm_path, &size);
+		u8 *kipm_data = (u8 *)boot_storage_file_read(kipm_path, &size);
 		if (!kipm_data)
 			return 1;
 

@@ -23,6 +23,7 @@
 #include "../hos/hos.h"
 #include "../hos/pkg1.h"
 #include <libs/fatfs/ff.h>
+#include <storage/boot_storage.h>
 
 #define SECTORS_TO_MIB_COEFF 11
 
@@ -72,15 +73,15 @@ static lv_res_t _cal0_dump_window_action(lv_obj_t *btns, const char * txt)
 
 	if (btn_idx == 1)
 	{
-		int error = !sd_mount();
+		int error = !boot_storage_mount();
 
 		if (!error)
 		{
 			char path[64];
 			emmcsn_path_impl(path, "/dumps", "cal0.bin", NULL);
-			error = sd_save_to_file((u8 *)cal0_buf, SZ_32K, path);
+			error = boot_storage_save_to_file((u8 *)cal0_buf, SZ_32K, path);
 
-			sd_unmount();
+			boot_storage_unmount();
 		}
 
 		_create_window_dump_done(error, "cal0.bin");
@@ -92,7 +93,7 @@ static lv_res_t _cal0_dump_window_action(lv_obj_t *btns, const char * txt)
 
 static lv_res_t _battery_dump_window_action(lv_obj_t * btn)
 {
-	int error = !sd_mount();
+	int error = !boot_storage_mount();
 
 	if (!error)
 	{
@@ -102,9 +103,9 @@ static lv_res_t _battery_dump_window_action(lv_obj_t * btn)
 		max17050_dump_regs(buf);
 
 		emmcsn_path_impl(path, "/dumps", "fuel_gauge.bin", NULL);
-		error = sd_save_to_file((u8 *)buf, 0x200, path);
+		error = boot_storage_save_to_file((u8 *)buf, 0x200, path);
 
-		sd_unmount();
+		boot_storage_unmount();
 	}
 
 	_create_window_dump_done(error, "fuel_gauge.bin");
@@ -116,7 +117,7 @@ static lv_res_t _bootrom_dump_window_action(lv_obj_t * btn)
 {
 	static const u32 BOOTROM_SIZE = 0x18000;
 
-	int error = !sd_mount();
+	int error = !boot_storage_mount();
 	if (!error)
 	{
 		char path[64];
@@ -126,13 +127,13 @@ static lv_res_t _bootrom_dump_window_action(lv_obj_t * btn)
 		if (!error)
 		{
 			emmcsn_path_impl(path, "/dumps", "evp_thunks.bin", NULL);
-			error = sd_save_to_file((u8 *)iram_evp_thunks, iram_evp_thunks_len, path);
+			error = boot_storage_save_to_file((u8 *)iram_evp_thunks, iram_evp_thunks_len, path);
 		}
 		else
 			error = 255;
 
 		emmcsn_path_impl(path, "/dumps", "bootrom_patched.bin", NULL);
-		int res = sd_save_to_file((u8 *)IROM_BASE, BOOTROM_SIZE, path);
+		int res = boot_storage_save_to_file((u8 *)IROM_BASE, BOOTROM_SIZE, path);
 		if (!error)
 			error = res;
 
@@ -141,13 +142,13 @@ static lv_res_t _bootrom_dump_window_action(lv_obj_t * btn)
 		memset((void*)IPATCH_BASE, 0, sizeof(ipatch_cam)); // Zeroing valid entries is enough but zero everything.
 
 		emmcsn_path_impl(path, "/dumps", "bootrom_unpatched.bin", NULL);
-		res = sd_save_to_file((u8 *)IROM_BASE, BOOTROM_SIZE, path);
+		res = boot_storage_save_to_file((u8 *)IROM_BASE, BOOTROM_SIZE, path);
 		if (!error)
 			error = res;
 
 		memcpy((void*)IPATCH_BASE, ipatch_cam, sizeof(ipatch_cam));
 
-		sd_unmount();
+		boot_storage_unmount();
 	}
 	_create_window_dump_done(error, "evp_thunks.bin, bootrom_patched.bin, bootrom_unpatched.bin");
 
@@ -158,22 +159,22 @@ static lv_res_t _fuse_dump_window_action(lv_obj_t * btn)
 {
 	const u32 fuse_array_size = (h_cfg.t210b01 ? FUSE_ARRAY_WORDS_NUM_B01 : FUSE_ARRAY_WORDS_NUM) * sizeof(u32);
 
-	int error = !sd_mount();
+	int error = !boot_storage_mount();
 	if (!error)
 	{
 		char path[128];
 		if (!h_cfg.t210b01)
 		{
 			emmcsn_path_impl(path, "/dumps", "fuse_cached_t210.bin", NULL);
-			error = sd_save_to_file((u8 *)0x7000F900, 0x300, path);
+			error = boot_storage_save_to_file((u8 *)0x7000F900, 0x300, path);
 		}
 		else
 		{
 			emmcsn_path_impl(path, "/dumps", "fuse_cached_t210b01_x898.bin", NULL);
-			error = sd_save_to_file((u8 *)0x7000F898, 0x68, path);
+			error = boot_storage_save_to_file((u8 *)0x7000F898, 0x68, path);
 			emmcsn_path_impl(path, "/dumps", "fuse_cached_t210b01_x900.bin", NULL);
 			if (!error)
-				error = sd_save_to_file((u8 *)0x7000F900, 0x300, path);
+				error = boot_storage_save_to_file((u8 *)0x7000F900, 0x300, path);
 		}
 
 		u32 words[FUSE_ARRAY_WORDS_NUM_B01];
@@ -182,11 +183,11 @@ static lv_res_t _fuse_dump_window_action(lv_obj_t * btn)
 			emmcsn_path_impl(path, "/dumps", "fuse_array_raw_t210.bin", NULL);
 		else
 			emmcsn_path_impl(path, "/dumps", "fuse_array_raw_t210b01.bin", NULL);
-		int res = sd_save_to_file((u8 *)words, fuse_array_size, path);
+		int res = boot_storage_save_to_file((u8 *)words, fuse_array_size, path);
 		if (!error)
 			error = res;
 
-		sd_unmount();
+		boot_storage_unmount();
 	}
 
 	if (!h_cfg.t210b01)
@@ -203,15 +204,15 @@ static lv_res_t _kfuse_dump_window_action(lv_obj_t * btn)
 	int error = !kfuse_read(buf);
 
 	if (!error)
-		error = !sd_mount();
+		error = !boot_storage_mount();
 
 	if (!error)
 	{
 		char path[64];
 		emmcsn_path_impl(path, "/dumps", "kfuses.bin", NULL);
-		error = sd_save_to_file((u8 *)buf, KFUSE_NUM_WORDS * 4, path);
+		error = boot_storage_save_to_file((u8 *)buf, KFUSE_NUM_WORDS * 4, path);
 
-		sd_unmount();
+		boot_storage_unmount();
 	}
 
 	_create_window_dump_done(error, "kfuses.bin");
@@ -241,7 +242,7 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 	lv_label_set_style(lb_desc, &monospace_text);
 	lv_obj_set_width(lb_desc, LV_HOR_RES / 9 * 4);
 
-	sd_mount();
+	boot_storage_mount();
 
 	// Dump CAL0.
 	int cal0_res = hos_dump_cal0();
@@ -341,7 +342,7 @@ static lv_res_t _create_mbox_cal0(lv_obj_t *btn)
 
 out:
 	free(txt_buf);
-	sd_unmount();
+	boot_storage_unmount();
 
 	lv_mbox_add_btns(mbox, mbox_btn_map, _cal0_dump_window_action);
 
@@ -2432,7 +2433,7 @@ static bool _lockpick_exists_check()
 
 	bool found = false;
 	void *buf = malloc(0x200);
-	if (sd_mount())
+	if (boot_storage_mount())
 	{
 		FIL fp;
 		if (f_open(&fp, "bootloader/payloads/Lockpick_RCM.bin", FA_READ))
@@ -2457,7 +2458,7 @@ static bool _lockpick_exists_check()
 
 out:
 	free(buf);
-	sd_unmount();
+	boot_storage_unmount();
 
 	return found;
 }

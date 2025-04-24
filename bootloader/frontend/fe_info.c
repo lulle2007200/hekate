@@ -236,7 +236,7 @@ void print_sdcard_info()
 		if (sd_mount())
 		{
 			gfx_puts("Acquiring FAT volume info...\n\n");
-			f_getfree(XSTR(FF_DEV_SD) ":", &sd_fs.free_clst, NULL);
+			f_getfree("sd:", &sd_fs.free_clst, NULL);
 			gfx_printf("%kFound %s volume:%k\n Free:    %d MiB\n Cluster: %d KiB\n",
 					TXT_CLR_CYAN_L, sd_fs.fs_type == FS_EXFAT ? "exFAT" : "FAT32", TXT_CLR_DEFAULT,
 					sd_fs.free_clst * sd_fs.csize >> SECTORS_TO_MIB_COEFF, (sd_fs.csize > 1) ? (sd_fs.csize >> 1) : 512);

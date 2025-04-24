@@ -18,6 +18,7 @@
 
 //! fix the dram stuff and the pop ups
 
+#include <storage/boot_storage.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -932,11 +933,11 @@ out:
 	free(txt_buf);
 	free(gui->base_path);
 	if (!partial_sd_full_unmount)
-		sd_unmount();
+		boot_storage_unmount();
 	else
 	{
 		partial_sd_full_unmount = false;
-		sd_end();
+		boot_storage_end();
 	}
 }
 
