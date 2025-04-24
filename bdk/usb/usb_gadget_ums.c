@@ -1861,7 +1861,7 @@ int usb_device_gadget_ums(usb_ctxt_t *usbs)
 	if (usbs->type == MMC_SD)
 	{
 		sd_end();
-		if (!sd_mount())
+		if (!sd_mount() && !sd_get_card_initialized())
 		{
 			ums.set_text(ums.label, "#FFDD00 Failed to init SD!#");
 			res = 1;
