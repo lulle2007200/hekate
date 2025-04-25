@@ -151,7 +151,7 @@ static lv_res_t _create_emummc_raw_format(lv_obj_t * btns, const char * txt)
 
 	// Create partition window.
 	if (!btn_idx)
-		create_window_partition_manager(btns);
+		create_window_partition_manager(btns, DRIVE_SD);
 
 	mbr_ctx.part_idx = 0;
 	mbr_ctx.sector_start = 0;

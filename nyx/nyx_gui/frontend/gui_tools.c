@@ -506,7 +506,7 @@ static lv_res_t _action_ums_emmc_boot1(lv_obj_t *btn)
 	return LV_RES_OK;
 }
 
-static lv_res_t _action_ums_emmc_gpp(lv_obj_t *btn)
+lv_res_t action_ums_emmc_gpp(lv_obj_t *btn)
 {
 	if (!nyx_emmc_check_battery_enough())
 		return LV_RES_OK;
@@ -703,7 +703,7 @@ void nyx_run_ums(void *param)
 		_action_ums_emmc_boot1(NULL);
 		break;
 	case NYX_UMS_EMMC_GPP:
-		_action_ums_emmc_gpp(NULL);
+		action_ums_emmc_gpp(NULL);
 		break;
 	case NYX_UMS_EMUMMC_BOOT0:
 		_action_ums_emuemmc_boot0(NULL);
@@ -795,7 +795,7 @@ static lv_res_t _create_window_usb_tools(lv_obj_t *parent)
 	label_btn = lv_label_create(btn_gpp, NULL);
 	lv_label_set_static_text(label_btn, SYMBOL_CHIP"  eMMC RAW GPP");
 	lv_obj_align(btn_gpp, label_txt2, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 2);
-	lv_btn_set_action(btn_gpp, LV_BTN_ACTION_CLICK, _action_ums_emmc_gpp);
+	lv_btn_set_action(btn_gpp, LV_BTN_ACTION_CLICK, action_ums_emmc_gpp);
 
 	// Create BOOT0 button.
 	lv_obj_t *btn_boot0 = lv_btn_create(h1, btn1);
@@ -1510,6 +1510,26 @@ out_end:
 	return LV_RES_OK;
 }
 
+lv_res_t _partition_action(lv_obj_t *btnm, const char *txt){
+	u8 drive;
+	switch(lv_btnm_get_pressed(btnm)){
+	case 0:
+		// SD
+		drive = DRIVE_SD;
+		break;
+	case 1:
+		// eMMC
+		drive = DRIVE_EMMC;
+		break;
+	default:
+		return LV_RES_OK;
+	}
+
+	create_window_partition_manager(btnm, drive);
+
+	return LV_RES_OK;
+}
+
 static void _create_tab_tools_emmc_pkg12(lv_theme_t *th, lv_obj_t *parent)
 {
 	lv_page_set_scrl_layout(parent, LV_LAYOUT_PRETTY);
@@ -1579,41 +1599,58 @@ static void _create_tab_tools_emmc_pkg12(lv_theme_t *th, lv_obj_t *parent)
 	lv_label_set_static_text(label_sep, "");
 
 	lv_obj_t *label_txt3 = lv_label_create(h2, NULL);
-	lv_label_set_static_text(label_txt3, "SD Partitions & USB");
+	lv_label_set_static_text(label_txt3, "Partitions & USB");
 	lv_obj_set_style(label_txt3, th->label.prim);
 	lv_obj_align(label_txt3, label_sep, LV_ALIGN_OUT_BOTTOM_LEFT, LV_DPI / 4, -LV_DPI * 3 / 10);
 
 	line_sep = lv_line_create(h2, line_sep);
 	lv_obj_align(line_sep, label_txt3, LV_ALIGN_OUT_BOTTOM_LEFT, -(LV_DPI / 4), LV_DPI / 8);
 
-	// Create Partition SD Card button.
-	lv_obj_t *btn3 = lv_btn_create(h2, NULL);
+	// Create Partition SD/eMMC Card button.
+	// TODO: Boot 1 partition option
+	static const char* btn_map[] = {"\222" SYMBOL_SD "  SD", "\222" SYMBOL_CHIP "  eMMC", ""};
+
+	lv_obj_t *btnm = lv_btnm_create(h2, NULL);
+	lv_btnm_set_style(btnm, LV_BTNM_STYLE_BG, th->bg);
+    lv_btnm_set_style(btnm, LV_BTNM_STYLE_BTN_REL, th->btn.rel);
+    lv_btnm_set_style(btnm, LV_BTNM_STYLE_BTN_PR, th->btn.pr);
+    lv_btnm_set_style(btnm, LV_BTNM_STYLE_BTN_TGL_REL, th->btn.tgl_rel);
+    lv_btnm_set_style(btnm, LV_BTNM_STYLE_BTN_TGL_PR, th->btn.tgl_pr);
+    lv_btnm_set_style(btnm, LV_BTNM_STYLE_BTN_INA, th->btn.ina);
 	if (hekate_bg)
 	{
-		lv_btn_set_style(btn3, LV_BTN_STYLE_REL, &btn_transp_rel);
-		lv_btn_set_style(btn3, LV_BTN_STYLE_PR, &btn_transp_pr);
+		lv_btn_set_style(btnm, LV_BTN_STYLE_REL, &btn_transp_rel);
+		lv_btn_set_style(btnm, LV_BTN_STYLE_PR, &btn_transp_pr);
 	}
-	label_btn = lv_label_create(btn3, NULL);
-	lv_btn_set_fit(btn3, true, true);
-	lv_label_set_static_text(label_btn, SYMBOL_SD"  Partition SD Card");
-	lv_obj_align(btn3, line_sep, LV_ALIGN_OUT_BOTTOM_LEFT, LV_DPI / 4, LV_DPI / 4);
-	lv_btn_set_action(btn3, LV_BTN_ACTION_CLICK, create_window_partition_manager);
+	lv_coord_t font_h = lv_font_get_height(th->btn.rel->text.font);
+    lv_obj_set_size(btnm, 400, font_h + 2 * th->btn.rel->body.padding.ver + 2 * th->bg->body.padding.ver);
+	lv_obj_align(btnm, line_sep, LV_ALIGN_OUT_BOTTOM_LEFT, LV_DPI / 4, LV_DPI / 4 - th->bg->body.padding.ver);
+	lv_btnm_set_map(btnm, btn_map);
+	lv_btnm_set_action(btnm, _partition_action);
+
 
 	lv_obj_t *label_txt4 = lv_label_create(h2, NULL);
 	lv_label_set_recolor(label_txt4, true);
 	lv_label_set_static_text(label_txt4,
-		"Allows you to partition the SD Card for using it with #C7EA46 emuMMC#,\n"
-		"#C7EA46 Android# and #C7EA46 Linux#. You can also flash Linux and Android.\n");
+		"Allows you to partition the SD Card or the eMMC \n"
+		"for using it with #C7EA46 emuMMC#, #C7EA46 Android# and #C7EA46 Linux#."
+		"\nYou can also flash Linux and Android.");
 	lv_obj_set_style(label_txt4, &hint_small_style);
-	lv_obj_align(label_txt4, btn3, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 3);
+	lv_obj_align(label_txt4, btnm, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 3 - th->bg->body.padding.ver);
 
 	label_sep = lv_label_create(h2, NULL);
 	lv_label_set_static_text(label_sep, "");
 	lv_obj_align(label_sep, label_txt4, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI * 11 / 7);
 
 	// Create USB Tools button.
-	lv_obj_t *btn4 = lv_btn_create(h2, btn3);
+	lv_obj_t *btn4 = lv_btn_create(h2, NULL);
 	label_btn = lv_label_create(btn4, NULL);
+	if (hekate_bg)
+	{
+		lv_btn_set_style(btn4, LV_BTN_STYLE_REL, &btn_transp_rel);
+		lv_btn_set_style(btn4, LV_BTN_STYLE_PR, &btn_transp_pr);
+	}
+	lv_btn_set_fit(btn4, true, true);
 	lv_label_set_static_text(label_btn, SYMBOL_USB"  USB Tools");
 	lv_obj_align(btn4, label_txt4, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 2);
 	lv_btn_set_action(btn4, LV_BTN_ACTION_CLICK, _create_window_usb_tools);

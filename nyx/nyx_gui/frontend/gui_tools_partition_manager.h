@@ -17,6 +17,6 @@
 #ifndef _GUI_TOOLS_PART_MANAGER_H_
 #define _GUI_TOOLS_PART_MANAGER_H_
 
-lv_res_t create_window_partition_manager(lv_obj_t *btn);
+lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive);
 
 #endif

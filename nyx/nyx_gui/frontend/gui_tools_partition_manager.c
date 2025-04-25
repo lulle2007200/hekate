@@ -25,7 +25,12 @@
 #include <libs/fatfs/diskio.h>
 #include <libs/lvgl/lvgl.h>
 #include <storage/boot_storage.h>
+#include <storage/emmc.h>
+#include <storage/mbr_gpt.h>
 #include <storage/sd.h>
+#include <storage/sdmmc.h>
+#include <string.h>
+#include <utils/sprintf.h>
 
 #define AU_ALIGN_SECTORS 0x8000 // 16MB.
 #define AU_ALIGN_BYTES   (AU_ALIGN_SECTORS * SD_BLOCKSIZE)
@@ -38,11 +43,13 @@
 extern volatile boot_cfg_t *b_cfg;
 extern volatile nyx_storage_t *nyx_str;
 
+
 typedef struct _partition_ctxt_t
 {
 	u32 total_sct;
 	u32 alignment;
 	int backup_possible;
+	bool skip_backup;
 
 	s32 hos_size;
 	u32 emu_size;
@@ -87,6 +94,14 @@ l4t_flasher_ctxt_t l4t_flash_ctxt;
 
 lv_obj_t *btn_flash_l4t;
 lv_obj_t *btn_flash_android;
+
+static void _wctombs(const u16 *src, char *dest, u32 len_max){
+	const u16 *cur = src;
+	do{
+		*dest++ = *cur & 0xff;
+		len_max--;
+	}while(*cur++ && len_max);
+}
 
 int _copy_file(const char *src, const char *dst, const char *path)
 {
@@ -521,7 +536,19 @@ static lv_res_t _action_part_manager_ums_sd(lv_obj_t *btn)
 	lv_action_t close_btn_action = lv_btn_get_action(close_btn, LV_BTN_ACTION_CLICK);
 	close_btn_action(close_btn);
 	lv_obj_del(ums_mbox);
-	create_window_partition_manager(NULL);
+	create_window_partition_manager(NULL, DRIVE_SD);
+
+	return LV_RES_INV;
+}
+
+static lv_res_t _action_part_manager_ums_emmc(lv_obj_t *btn){
+	action_ums_emmc_gpp(btn);
+
+	// Close and reopen partition manager.
+	lv_action_t close_btn_action = lv_btn_get_action(close_btn, LV_BTN_ACTION_CLICK);
+	close_btn_action(close_btn);
+	lv_obj_del(ums_mbox);
+	create_window_partition_manager(NULL, DRIVE_EMMC);
 
 	return LV_RES_INV;
 }
@@ -1506,30 +1533,32 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 	// Read current MBR.
 	sdmmc_storage_read(&sd_storage, 0, 1, &part_info.mbr_old);
 
-	lv_label_set_text(lbl_status, "#00DDFF Status:# Initializing Ramdisk...");
-	lv_label_set_text(lbl_paths[0], "Please wait...");
-	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
-	manual_system_maintenance(true);
+	if(!part_info.skip_backup){
+		lv_label_set_text(lbl_status, "#00DDFF Status:# Initializing Ramdisk...");
+		lv_label_set_text(lbl_paths[0], "Please wait...");
+		lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+		manual_system_maintenance(true);
 
-	// Initialize RAM disk.
-	if (ram_disk_init(&ram_fs, RAM_DISK_SZ))
-	{
-		lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to initialize Ramdisk!");
-		goto error;
-	}
+		// Initialize RAM disk.
+		if (ram_disk_init(&ram_fs, RAM_DISK_SZ))
+		{
+			lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to initialize Ramdisk!");
+			goto error;
+		}
 
-	lv_label_set_text(lbl_status, "#00DDFF Status:# Backing up files...");
-	manual_system_maintenance(true);
+		lv_label_set_text(lbl_status, "#00DDFF Status:# Backing up files...");
+		manual_system_maintenance(true);
 
-	// Do full or hekate/Nyx backup.
-	if (_backup_and_restore_files(true, lbl_paths))
-	{
-		if (part_info.backup_possible)
-			lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to back up files!");
-		else
-			lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to back up files!\nBootloader folder exceeds 1GB or corrupt!");
+		// Do full or hekate/Nyx backup.
+		if (_backup_and_restore_files(true, lbl_paths))
+		{
+			if (part_info.backup_possible)
+				lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to back up files!");
+			else
+				lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to back up files!\nBootloader folder exceeds 1GB or corrupt!");
 
-		goto error;
+			goto error;
+		}
 	}
 
 	sd_unmount();
@@ -1609,17 +1638,19 @@ mkfs_no_error:
 	manual_system_maintenance(true);
 
 	// Restore backed up files back to SD.
-	if (_backup_and_restore_files(false, lbl_paths))
-	{
-		// Failed to restore files. Try again once more.
+	if(!part_info.skip_backup){
 		if (_backup_and_restore_files(false, lbl_paths))
 		{
-			lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to restore files!");
-			goto error;
+			// Failed to restore files. Try again once more.
+			if (_backup_and_restore_files(false, lbl_paths))
+			{
+				lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to restore files!");
+				goto error;
+			}
 		}
+		f_mount(NULL, "ram:", 1); // Unmount ramdisk.
 	}
 
-	f_mount(NULL, "ram:", 1); // Unmount ramdisk.
 	f_chdrive(cwd);
 
 	// Set Volume label.
@@ -2047,10 +2078,10 @@ static lv_res_t _mbox_check_files_total_size_option(lv_obj_t *btns, const char *
 	return LV_RES_INV;
 }
 
-static void _create_mbox_check_files_total_size()
+static void _create_mbox_check_files_total_size(u8 drive)
 {
-	static lv_style_t bar_hos_ind, bar_emu_ind, bar_l4t_ind, bar_and_ind;
-	static lv_style_t sep_emu_bg, sep_l4t_bg, sep_and_bg;
+	static lv_style_t bar_hos_os_ind, bar_hos_ind, bar_emu_ind, bar_l4t_ind, bar_and_ind, bar_remaining_ind;
+	static lv_style_t sep_hos_os_bg, sep_hos_bg, sep_emu_bg, sep_l4t_bg, sep_and_bg;
 
 	// Set HOS bar style.
 	lv_style_copy(&bar_hos_ind, lv_theme_get_current()->bar.indic);
@@ -2067,22 +2098,42 @@ static void _create_mbox_check_files_total_size()
 	bar_l4t_ind.body.main_color = LV_COLOR_HEX(0x00DDFF);
 	bar_l4t_ind.body.grad_color = bar_l4t_ind.body.main_color;
 
-	// Set GPT bar style.
+	// Set Android bar style.
 	lv_style_copy(&bar_and_ind, lv_theme_get_current()->bar.indic);
-	bar_and_ind.body.main_color = LV_COLOR_HEX(0xC000FF);
+	bar_and_ind.body.main_color = LV_COLOR_HEX(0xff8000);
 	bar_and_ind.body.grad_color = bar_and_ind.body.main_color;
 
+	// Set HOS OS bar style.
+	lv_style_copy(&bar_hos_os_ind, lv_theme_get_current()->bar.indic);
+	bar_hos_os_ind.body.main_color = LV_COLOR_HEX(0xffd300);
+	bar_hos_os_ind.body.grad_color = bar_hos_os_ind.body.main_color;
+
+	// Set Remaining bar style.
+	lv_style_copy(&bar_remaining_ind, lv_theme_get_current()->bar.indic);
+	bar_remaining_ind.body.main_color = LV_COLOR_HEX(0xc9c9c9);
+	bar_remaining_ind.body.grad_color = bar_remaining_ind.body.main_color;
+
 	// Set separator styles.
-	lv_style_copy(&sep_emu_bg, lv_theme_get_current()->cont);
+	lv_style_copy(&sep_hos_os_bg, lv_theme_get_current()->cont);
+	sep_hos_os_bg.body.main_color = LV_COLOR_HEX(0xc9c9c9);
+	sep_hos_os_bg.body.grad_color = sep_hos_os_bg.body.main_color;
+	sep_hos_os_bg.body.radius = 0;
+
+	lv_style_copy(&sep_hos_bg, &sep_hos_os_bg);
+	sep_hos_bg.body.main_color = LV_COLOR_HEX(0x96FF00);
+	sep_hos_bg.body.grad_color = sep_hos_bg.body.main_color;
+
+	lv_style_copy(&sep_and_bg, &sep_hos_os_bg);
+	sep_and_bg.body.main_color = LV_COLOR_HEX(0xff8000);
+	sep_and_bg.body.grad_color = sep_and_bg.body.main_color;
+
+	lv_style_copy(&sep_emu_bg, &sep_hos_os_bg);
 	sep_emu_bg.body.main_color = LV_COLOR_HEX(0xFF3C28);
 	sep_emu_bg.body.grad_color = sep_emu_bg.body.main_color;
-	sep_emu_bg.body.radius = 0;
-	lv_style_copy(&sep_l4t_bg, &sep_emu_bg);
+
+	lv_style_copy(&sep_l4t_bg, &sep_hos_os_bg);
 	sep_l4t_bg.body.main_color = LV_COLOR_HEX(0x00DDFF);
 	sep_l4t_bg.body.grad_color = sep_l4t_bg.body.main_color;
-	lv_style_copy(&sep_and_bg, &sep_emu_bg);
-	sep_and_bg.body.main_color = LV_COLOR_HEX(0xC000FF);
-	sep_and_bg.body.grad_color = sep_and_bg.body.main_color;
 
 	char *txt_buf = malloc(SZ_8K);
 
@@ -2096,7 +2147,7 @@ static void _create_mbox_check_files_total_size()
 	lv_mbox_set_recolor_text(mbox, true);
 	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 6);
 
-	lv_mbox_set_text(mbox, "Analyzing SD card usage. This might take a while...");
+	lv_mbox_set_text(mbox, drive == DRIVE_SD ? "Analyzing SD card usage. This might take a while..." : "Analyzing eMMC usage. This might take a while...");
 
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_top(mbox, true);
@@ -2108,7 +2159,12 @@ static void _create_mbox_check_files_total_size()
 	path[0] = 0;
 
 	// Check total size of files.
-	int res = _stat_and_copy_files("sd:", NULL, path, &total_files, &total_size, NULL);
+	int res = _stat_and_copy_files(drive == DRIVE_SD ? "sd:" : "emmc:", NULL, path, &total_files, &total_size, NULL);
+
+	if(res == FR_NO_FILESYSTEM){
+		// no fat system on selected storage, nothing to backup
+		part_info.skip_backup = true;
+	}
 
 	// Not more than 1.0GB.
 	part_info.backup_possible = !res && !(total_size > (RAM_DISK_SZ - SZ_16M));
@@ -2116,17 +2172,31 @@ static void _create_mbox_check_files_total_size()
 	if (part_info.backup_possible)
 	{
 		s_printf(txt_buf,
-			"#96FF00 The SD Card files will be backed up automatically!#\n"
-			"#FFDD00 Any other partition will be wiped!#\n"
-			"#00DDFF Total files:# %d, #00DDFF Total size:# %d MiB", total_files, total_size >> 20);
+			"#96FF00 The %s files will be backed up automatically!#\n"
+			"#FFDD00 Any other partitions %swill be wiped!#\n"
+			"#00DDFF Total files:# %d, #00DDFF Total size:# %d MiB", 
+			drive == DRIVE_SD ? "SD card" : "eMMC", 
+			drive == DRIVE_SD ? "" : "(except HOS ones) ", 
+			total_files, 
+			total_size >> 20);
 		lv_mbox_set_text(mbox, txt_buf);
 	}
 	else
 	{
-		lv_mbox_set_text(mbox,
-			"#FFDD00 The SD Card cannot be backed up automatically!#\n"
-			"#FFDD00 Any other partition will be also wiped!#\n\n"
-			"You will be asked to back up your files later via UMS.");
+		if(res){
+			s_printf(txt_buf,
+				"#96FF00 No %s files to be backed up!#\n"
+				"#FFDD00 Any other partitions %swill be wiped!#\n", 
+				drive == DRIVE_SD ? "SD card" : "eMMC", drive == DRIVE_SD ? "" : "(except HOS ones) ");
+		}else{
+			s_printf(txt_buf,
+				"#FFDD00 The %s files cannot be backed up automatically!#\n"
+				"#FFDD00 Any other partitions %swill be wiped!#\n\n"
+				"You will be asked to back up your files later via UMS.",
+				drive == DRIVE_SD ? "SD card" : "eMMC", 
+				drive == DRIVE_SD ? "" : "(except HOS ones) ");
+		}
+		lv_mbox_set_text(mbox, txt_buf);
 	}
 
 	// Create container to keep content inside.
@@ -2135,90 +2205,214 @@ static void _create_mbox_check_files_total_size()
 	lv_cont_set_style(h1, &lv_style_transp_tight);
 	lv_obj_set_width(h1, lv_obj_get_width(mbox) - LV_DPI * 3);
 
-	lv_obj_t *lbl_part = lv_label_create(h1, NULL);
-	lv_label_set_recolor(lbl_part, true);
-	lv_label_set_text(lbl_part, "#00DDFF Current MBR partition layout:#");
+
+	u32 bar_hos_size       = 0;
+	u32 bar_emu_size       = 0;
+	u32 bar_l4t_size       = 0;
+	u32 bar_and_size       = 0;
+	u32 bar_hos_os_size    = 0;
+	u32 bar_remaining_size = 0;
+	mbr_t *mbr = zalloc(sizeof(*mbr));
+	gpt_t *gpt = NULL;
+	bool has_gpt = false;
+
+	sdmmc_storage_t *storage = drive == DRIVE_SD ? &sd_storage : &emmc_storage;
+	total_size = storage->sec_cnt;
 
 	// Read current MBR.
-	mbr_t mbr = { 0 };
-	sdmmc_storage_read(&sd_storage, 0, 1, &mbr);
+	sdmmc_storage_read(storage, 0, 1, mbr);
 
-	// Calculate MBR partitions size.
-	total_size = (sd_storage.sec_cnt - AU_ALIGN_SECTORS) / SECTORS_PER_GB;
-	u32 bar_hos_size = lv_obj_get_width(h1) * (mbr.partitions[0].size_sct / SECTORS_PER_GB) / total_size;
-	u32 bar_emu_size = 0;
-	for (u32 i = 1; i < 4; i++)
-		if (mbr.partitions[i].type == 0xE0)
-			bar_emu_size += mbr.partitions[i].size_sct;
-	bar_emu_size = lv_obj_get_width(h1) * (bar_emu_size / SECTORS_PER_GB) / total_size;
+	// check if we have gpt
+	for(u32 i = 0; i < 4; i++){
+		if(mbr->partitions[i].type == 0xee){
+			has_gpt = true;
+			break;
+		}
+	}
 
-	u32 bar_l4t_size = 0;
-	for (u32 i = 1; i < 4; i++)
-		if (mbr.partitions[i].type == 0x83)
-			bar_l4t_size += mbr.partitions[i].size_sct;
-	bar_l4t_size = lv_obj_get_width(h1) * (bar_l4t_size / SECTORS_PER_GB) / total_size;
+	lv_obj_t *lbl_part = lv_label_create(h1, NULL);
+	lv_label_set_recolor(lbl_part, true);
+	s_printf(txt_buf, "#00DDFF Current %s partition layout:#", has_gpt ? "GPT" : "MBR");
+	lv_label_set_text(lbl_part, txt_buf);
+	
+	if(!has_gpt){
+		// Calculate MBR partitions size.
+		bar_hos_size = mbr->partitions[0].size_sct;
+		for (u32 i = 1; i < 4; i++)
+			if (mbr->partitions[i].type == 0xE0)
+				bar_emu_size += mbr->partitions[i].size_sct;
 
-	u32 bar_and_size = lv_obj_get_width(h1) - bar_hos_size - bar_emu_size - bar_l4t_size;
+		for (u32 i = 1; i < 4; i++)
+			if (mbr->partitions[i].type == 0x83)
+				bar_l4t_size += mbr->partitions[i].size_sct;
+	}else{
+		// Calculate GPT part size.
+		gpt = zalloc(sizeof(*gpt));
+
+		sdmmc_storage_read(storage, 1, sizeof(*gpt) >> 9, gpt);
+
+		u32 i = 0;
+		if(!memcmp(gpt->entries[10].name, (char[]){'U', 0, 'S', 0, 'E', 0, 'R', 0}, 7)){
+			bar_hos_os_size += gpt->entries[10].lba_end - gpt->entries[0].lba_start + 1;
+			i = 10;
+		}
+
+		for(; i < gpt->header.num_part_ents && i < 128; i++){
+			gpt_entry_t *entry = &gpt->entries[i];
+
+			if(!memcmp(entry->name, (char[]){ 'e', 0, 'm', 0, 'u', 0, 'm', 0, 'm', 0, 'c', 0 }, 12)){
+				bar_emu_size += entry->lba_end - entry->lba_start + 1;
+			}
+
+			if(!memcmp(entry->name, (char[]){ 'b', 0, 'o', 0, 'o', 0, 't', 0 }, 8)){
+				if(i + 6 < gpt->header.num_part_ents && i + 6 < 128){
+					if(!memcmp(gpt->entries[i + 6].name, (char[]){ 'u', 0, 's', 0, 'e', 0, 'r', 0, 'd', 0, 'a', 0, 't', 0, 'a', 0 }, 16)){
+						// found android dynamic
+
+						bar_and_size += gpt->entries[i + 6].lba_end - gpt->entries[i].lba_start + 1;
+						i += 6;
+					}
+				}
+			}
+
+			if(!memcmp(entry->name, (char[]){ 'v', 0, 'e', 0, 'n', 0, 'd', 0, 'o', 0, 'r', 0 }, 12)){
+				if(i + 8 < gpt->header.num_part_ents && i + 8 < 128){
+					if(!memcmp(gpt->entries[i + 8].name, (char[]){ 'U', 0, 'D', 0, 'A', 0 }, 6)){
+						// found android regular
+
+						bar_and_size += gpt->entries[i + 8].lba_end - gpt->entries[i].lba_start + 1;
+						i += 8;
+					}
+				}
+			}
+
+			if(!memcmp(entry->name, (char[]){ 'l', 0, '4', 0, 't', 0 }, 6)){
+				bar_l4t_size += entry->lba_end - entry->lba_start + 1;
+			}
+
+			if(!memcmp(entry->name, (char[]){ 'h', 0, 'o', 0, 's', 0, '_', 0, 'd', 0, 'a', 0, 't', 0, 'a', 0 }, 16)){
+				bar_hos_size += entry->lba_end - entry->lba_start + 1;
+			}
+		}
+	}
+
+
+
+	bar_remaining_size = total_size - (bar_l4t_size + bar_and_size + bar_hos_os_size + bar_hos_size + bar_emu_size);
+
+	lv_coord_t w = lv_obj_get_width(h1);
+	bar_remaining_size = w * (bar_remaining_size / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
+	bar_l4t_size       = w * (bar_l4t_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
+	bar_and_size       = w * (bar_and_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
+	bar_hos_os_size    = w * (bar_hos_os_size    / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
+	bar_hos_size       = w * (bar_hos_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
+	bar_emu_size       = w * (bar_emu_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
+
+	// Create HOS OS bar.
+	lv_obj_t *bar_hos_os = lv_bar_create(h1, NULL);
+	lv_obj_set_size(bar_hos_os, bar_hos_os_size, LV_DPI / 3);
+	lv_bar_set_range(bar_hos_os, 0, 1);
+	lv_bar_set_value(bar_hos_os, 1);
+	lv_bar_set_style(bar_hos_os, LV_BAR_STYLE_INDIC, &bar_hos_os_ind);
+	lv_obj_align(bar_hos_os, lbl_part, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 6);
 
 	// Create HOS bar.
-	lv_obj_t *bar_mbr_hos = lv_bar_create(h1, NULL);
-	lv_obj_set_size(bar_mbr_hos, bar_hos_size, LV_DPI / 3);
-	lv_bar_set_range(bar_mbr_hos, 0, 1);
-	lv_bar_set_value(bar_mbr_hos, 1);
-	lv_bar_set_style(bar_mbr_hos, LV_BAR_STYLE_INDIC, &bar_hos_ind);
-	lv_obj_align(bar_mbr_hos, lbl_part, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 6);
+	lv_obj_t *bar_hos = lv_bar_create(h1, bar_hos_os);
+	lv_obj_set_size(bar_hos, bar_hos_size, LV_DPI / 3);
+	lv_bar_set_style(bar_hos, LV_BAR_STYLE_INDIC, &bar_hos_ind);
+	lv_obj_align(bar_hos, bar_hos_os, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 
 	// Create emuMMC bar.
-	lv_obj_t *bar_mbr_emu = lv_bar_create(h1, bar_mbr_hos);
-	lv_obj_set_size(bar_mbr_emu, bar_emu_size, LV_DPI / 3);
-	lv_bar_set_style(bar_mbr_emu, LV_BAR_STYLE_INDIC, &bar_emu_ind);
-	lv_obj_align(bar_mbr_emu, bar_mbr_hos, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+	lv_obj_t *bar_emu = lv_bar_create(h1, bar_hos_os);
+	lv_obj_set_size(bar_emu, bar_emu_size, LV_DPI / 3);
+	lv_bar_set_style(bar_emu, LV_BAR_STYLE_INDIC, &bar_emu_ind);
+	lv_obj_align(bar_emu, bar_hos, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 
 	// Create L4T bar.
-	lv_obj_t *bar_mbr_l4t = lv_bar_create(h1, bar_mbr_hos);
-	lv_obj_set_size(bar_mbr_l4t, bar_l4t_size, LV_DPI / 3);
-	lv_bar_set_style(bar_mbr_l4t, LV_BAR_STYLE_INDIC, &bar_l4t_ind);
-	lv_obj_align(bar_mbr_l4t, bar_mbr_emu, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+	lv_obj_t *bar_l4t = lv_bar_create(h1, bar_hos_os);
+	lv_obj_set_size(bar_l4t, bar_l4t_size, LV_DPI / 3);
+	lv_bar_set_style(bar_l4t, LV_BAR_STYLE_INDIC, &bar_l4t_ind);
+	lv_obj_align(bar_l4t, bar_emu, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 
 	// Create GPT bar.
-	lv_obj_t *bar_mbr_gpt = lv_bar_create(h1, bar_mbr_hos);
-	lv_obj_set_size(bar_mbr_gpt, bar_and_size > 1 ? bar_and_size : 0, LV_DPI / 3);
-	lv_bar_set_style(bar_mbr_gpt, LV_BAR_STYLE_INDIC, &bar_and_ind);
-	lv_obj_align(bar_mbr_gpt, bar_mbr_l4t, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+	lv_obj_t *bar_and = lv_bar_create(h1, bar_hos_os);
+	lv_obj_set_size(bar_and, bar_and_size, LV_DPI / 3);
+	lv_bar_set_style(bar_and, LV_BAR_STYLE_INDIC, &bar_and_ind);
+	lv_obj_align(bar_and, bar_l4t, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+
+	// Create Remaining bar.
+	lv_obj_t *bar_remaining = lv_bar_create(h1, bar_hos_os);
+	lv_obj_set_size(bar_remaining, bar_remaining_size, LV_DPI / 3);
+	lv_bar_set_style(bar_remaining, LV_BAR_STYLE_INDIC, &bar_remaining_ind);
+	lv_obj_align(bar_remaining, bar_and, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+
+
+
+	// Create HOS OS separator.
+	lv_obj_t *sep_hos_os = lv_cont_create(h1, NULL);
+	lv_obj_set_size(sep_hos_os, bar_hos_os_size ? 8 : 0, LV_DPI / 3);
+	lv_obj_set_style(sep_hos_os, &sep_hos_os_bg);
+	lv_obj_align(sep_hos_os, bar_hos_os, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+
+	// Create HOS separator.
+	lv_obj_t *sep_hos = lv_cont_create(h1, NULL);
+	lv_obj_set_size(sep_hos, bar_hos_size ? 8 : 0, LV_DPI / 3);
+	lv_obj_set_style(sep_hos, &sep_hos_bg);
+	lv_obj_align(sep_hos, bar_hos, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
 	// Create emuMMC separator.
-	lv_obj_t *sep_mbr_emu = lv_cont_create(h1, NULL);
-	lv_obj_set_size(sep_mbr_emu, bar_emu_size ? 8 : 0, LV_DPI / 3);
-	lv_obj_set_style(sep_mbr_emu, &sep_emu_bg);
-	lv_obj_align(sep_mbr_emu, bar_mbr_hos, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+	lv_obj_t *sep_emu = lv_cont_create(h1, NULL);
+	lv_obj_set_size(sep_emu, bar_emu_size ? 8 : 0, LV_DPI / 3);
+	lv_obj_set_style(sep_emu, &sep_emu_bg);
+	lv_obj_align(sep_emu, bar_emu, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
 	// Create L4T separator.
-	lv_obj_t *sep_mbr_l4t = lv_cont_create(h1, sep_mbr_emu);
-	lv_obj_set_size(sep_mbr_l4t, bar_l4t_size ? 8 : 0, LV_DPI / 3);
-	lv_obj_set_style(sep_mbr_l4t, &sep_l4t_bg);
-	lv_obj_align(sep_mbr_l4t, bar_mbr_emu, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+	lv_obj_t *sep_l4t = lv_cont_create(h1, NULL);
+	lv_obj_set_size(sep_l4t, bar_l4t_size ? 8 : 0, LV_DPI / 3);
+	lv_obj_set_style(sep_l4t, &sep_l4t_bg);
+	lv_obj_align(sep_l4t, bar_l4t, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
-	// Create GPT separator.
-	lv_obj_t *sep_mbr_gpt = lv_cont_create(h1, sep_mbr_emu);
-	lv_obj_set_size(sep_mbr_gpt, bar_and_size ? (bar_and_size > 1 ? 8 : 0) : 0, LV_DPI / 3);
-	lv_obj_set_style(sep_mbr_gpt, &sep_and_bg);
-	lv_obj_align(sep_mbr_gpt, bar_mbr_l4t, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+	// Create Android separator.
+	lv_obj_t *sep_and = lv_cont_create(h1, NULL);
+	lv_obj_set_size(sep_and, bar_and_size ? 8 : 0, LV_DPI / 3);
+	lv_obj_set_style(sep_and, &sep_and_bg);
+	lv_obj_align(sep_and, bar_l4t, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
 	// Print partition table info.
-	s_printf(txt_buf,
-		"Partition 0 - Type: %02x, Start: %08x, Size: %08x\n"
-		"Partition 1 - Type: %02x, Start: %08x, Size: %08x\n"
-		"Partition 2 - Type: %02x, Start: %08x, Size: %08x\n"
-		"Partition 3 - Type: %02x, Start: %08x, Size: %08x",
-		mbr.partitions[0].type, mbr.partitions[0].start_sct, mbr.partitions[0].size_sct,
-		mbr.partitions[1].type, mbr.partitions[1].start_sct, mbr.partitions[1].size_sct,
-		mbr.partitions[2].type, mbr.partitions[2].start_sct, mbr.partitions[2].size_sct,
-		mbr.partitions[3].type, mbr.partitions[3].start_sct, mbr.partitions[3].size_sct);
+	if(!has_gpt){
+		// print mbr table
+		s_printf(txt_buf,
+			"Part. 0 - Type: %02x, Start: %08x, Size: %08x\n"
+			"Part. 1 - Type: %02x, Start: %08x, Size: %08x\n"
+			"Part. 2 - Type: %02x, Start: %08x, Size: %08x\n"
+			"Part. 3 - Type: %02x, Start: %08x, Size: %08x",
+			mbr->partitions[0].type, mbr->partitions[0].start_sct, mbr->partitions[0].size_sct,
+			mbr->partitions[1].type, mbr->partitions[1].start_sct, mbr->partitions[1].size_sct,
+			mbr->partitions[2].type, mbr->partitions[2].start_sct, mbr->partitions[2].size_sct,
+			mbr->partitions[3].type, mbr->partitions[3].start_sct, mbr->partitions[3].size_sct);
+	}else{
+		strcpy(txt_buf, "");
+		for(u32 i = 0; i < gpt->header.num_part_ents && i < 128; i++){
+			char txt_buf2[36];
+			_wctombs((u16*)&gpt->entries[i].name, txt_buf2, 36);
+			if(gpt->header.num_part_ents > 9){
+				s_printf(txt_buf + strlen(txt_buf), "Part. %02d - Name : %s\n           Start: %08x, Size: %08x%c", i, txt_buf2, (u32)gpt->entries[i].lba_start, (u32)(gpt->entries[i].lba_end - gpt->entries[i].lba_start + 1), i == gpt->header.num_part_ents || i == 127 ? '\0' : '\n');
+			}else{
+				s_printf(txt_buf + strlen(txt_buf), "Part. %d - Name: %s\n          Start: %08x, Size: %08x%c", i, txt_buf2, (u32)gpt->entries[i].lba_start, (u32)(gpt->entries[i].lba_end - gpt->entries[i].lba_start + 1), i == gpt->header.num_part_ents || i == 127 ? '\0' : '\n');
+			}
+		}
+	}
 
-	lv_obj_t *lbl_table = lv_label_create(h1, NULL);
-	lv_label_set_style(lbl_table, &monospace_text);
-	lv_label_set_text(lbl_table, txt_buf);
-	lv_obj_align(lbl_table, h1, LV_ALIGN_IN_TOP_MID, 0, LV_DPI);
+
+	lv_obj_t *ta_table = lv_ta_create(h1, NULL);
+	lv_ta_set_cursor_type(ta_table, LV_CURSOR_NONE);
+	lv_ta_set_text_align(ta_table, LV_LABEL_ALIGN_LEFT);
+	lv_ta_set_sb_mode(ta_table, LV_SB_MODE_AUTO);
+	lv_ta_set_style(ta_table, LV_TA_STYLE_BG, &monospace_text);
+	lv_obj_set_size(ta_table, w, w * 2 / 7);
+	lv_ta_set_text(ta_table, txt_buf);
+	lv_obj_align(ta_table, h1, LV_ALIGN_IN_TOP_MID, 0, LV_DPI);
+
 
 	if (!part_info.backup_possible)
 		lv_mbox_add_btns(mbox, mbox_btn_map, mbox_action);
@@ -2229,6 +2423,8 @@ static void _create_mbox_check_files_total_size()
 
 	free(txt_buf);
 	free(path);
+	free(mbr);
+	free(gpt);
 }
 
 static lv_res_t _action_fix_mbr(lv_obj_t *btn)
@@ -2483,11 +2679,15 @@ out:
 	return LV_RES_OK;
 }
 
-lv_res_t create_window_partition_manager(lv_obj_t *btn)
+lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 {
-	lv_obj_t *win = nyx_create_standard_window(SYMBOL_SD" Partition Manager");
+	char title_str[0x20];
+	s_printf(title_str, "%s %s Partition Manager", drive == DRIVE_SD ? SYMBOL_SD : SYMBOL_CHIP, drive == DRIVE_SD ? "SD" : "eMMC");
+	lv_obj_t *win = nyx_create_standard_window(title_str);
 
-	lv_win_add_btn(win, NULL, SYMBOL_MODULES_ALT" Fix Hybrid MBR", _action_fix_mbr);
+	if(drive == DRIVE_SD){
+		lv_win_add_btn(win, NULL, SYMBOL_MODULES_ALT" Fix Hybrid MBR", _action_fix_mbr);
+	}
 
 	static lv_style_t bar_hos_bg, bar_emu_bg, bar_l4t_bg, bar_and_bg;
 	static lv_style_t bar_hos_ind, bar_emu_ind, bar_l4t_ind, bar_and_ind;
@@ -2556,20 +2756,34 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn)
 	lv_obj_t *h1 = lv_cont_create(win, NULL);
 	lv_obj_set_size(h1, LV_HOR_RES - (LV_DPI * 8 / 10), LV_VER_RES - LV_DPI);
 
-	if (!sd_mount())
+
+	sdmmc_storage_t *storage = drive == DRIVE_SD ? &sd_storage : &emmc_storage;
+	bool res = false;
+	FATFS fs;
+	if(drive == DRIVE_SD){
+		res = sd_mount() || sd_initialize(false);
+	}else{
+		if(boot_storage_get_drive() == DRIVE_EMMC){
+			boot_storage_unmount();
+		}
+		res = emmc_initialize(false);
+		f_mount(&fs, "emmc:", 1);
+	}
+
+	if (!res)
 	{
 		lv_obj_t *lbl = lv_label_create(h1, NULL);
 		lv_label_set_recolor(lbl, true);
-		lv_label_set_text(lbl, "#FFDD00 Failed to init SD!#");
+		lv_label_set_text(lbl, drive == DRIVE_SD ? "#FFDD00 Failed to init SD!#" : "#FFDD00 Failed to init eMMC!#");
 		return LV_RES_OK;
 	}
 
 	memset(&part_info, 0, sizeof(partition_ctxt_t));
-	_create_mbox_check_files_total_size();
+	_create_mbox_check_files_total_size(drive);
 
 	char *txt_buf = malloc(SZ_8K);
 
-	part_info.total_sct = sd_storage.sec_cnt;
+	part_info.total_sct = storage->sec_cnt;
 
 	// Align down total size to ensure alignment of all partitions after HOS one.
 	part_info.alignment = part_info.total_sct - ALIGN_DOWN(part_info.total_sct, AU_ALIGN_SECTORS);
@@ -2737,12 +2951,19 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn)
 	part_info.lbl_and = lbl_sl_and;
 
 	// Set partition manager notes.
-	lv_obj_t *lbl_notes = lv_label_create(h1, NULL);
-	lv_label_set_recolor(lbl_notes, true);
-	lv_label_set_static_text(lbl_notes,
+	const char *sd_notes = 
 		"Note 1: Only up to #C7EA46 1GB# can be backed up. If more, you will be asked to back them manually at the next step.\n"
 		"Note 2: Resized emuMMC formats the USER partition. A save data manager can be used to move them over.\n"
-		"Note 3: The #C7EA46 Flash Linux# and #C7EA46 Flash Android# will flash files if suitable partitions and installer files are found.\n");
+		"Note 3: The #C7EA46 Flash Linux# and #C7EA46 Flash Android# will flash files if suitable partitions and installer files are found.\n";
+
+	const char *emmc_notes =
+		"Note 1: Resizing the #C7EA46 HOS USER# partition will format it, setting it to 0 will #C7EA46 remove# HOS from eMMC.\n"
+		"Note 2: Resized emuMMC formats the USER partition. A save data manager can be used to move them over.\n"
+		"Note 3: The #C7EA46 Flash Linux# and #C7EA46 Flash Android# will flash files if suitable partitions and installer files are found.\n";
+
+	lv_obj_t *lbl_notes = lv_label_create(h1, NULL);
+	lv_label_set_recolor(lbl_notes, true);
+	lv_label_set_static_text(lbl_notes, drive == DRIVE_SD ? sd_notes : emmc_notes);
 	lv_label_set_style(lbl_notes, &hint_small_style);
 	lv_obj_align(lbl_notes, lbl_and, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 5);
 
@@ -2750,9 +2971,9 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn)
 	lv_obj_t *btn1 = lv_btn_create(h1, NULL);
 	lv_obj_t *label_btn = lv_label_create(btn1, NULL);
 	lv_btn_set_fit(btn1, true, true);
-	lv_label_set_static_text(label_btn, SYMBOL_USB"  SD UMS");
+	lv_label_set_static_text(label_btn, drive == DRIVE_SD ? SYMBOL_USB"  SD UMS" : SYMBOL_CHIP "  eMMC UMS");
 	lv_obj_align(btn1, h1, LV_ALIGN_IN_TOP_LEFT, 0, LV_DPI * 5);
-	lv_btn_set_action(btn1, LV_BTN_ACTION_CLICK, _action_part_manager_ums_sd);
+	lv_btn_set_action(btn1, LV_BTN_ACTION_CLICK, drive == DRIVE_SD ? _action_part_manager_ums_sd : _action_part_manager_ums_emmc);
 
 	// Create Flash Linux button.
 	btn_flash_l4t = lv_btn_create(h1, NULL);
@@ -2803,7 +3024,12 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn)
 
 	free(txt_buf);
 
-	sd_unmount();
+	if(drive == DRIVE_SD){
+		sd_unmount();
+	}else{
+		f_mount(NULL, "emmc:", 0);
+	}
+
 
 	return LV_RES_OK;
 }
