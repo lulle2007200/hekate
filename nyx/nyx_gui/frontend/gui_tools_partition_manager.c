@@ -47,6 +47,8 @@
 #define HOS_MIN_SIZE_MB        2048
 #define ANDROID_SYSTEM_SIZE_MB 6144 // 6 GB. Fits both Legacy (4912MB) and Dynamic (6144MB) partition schemes.
 
+#define ENABLE_DUAL_ANDROID 1
+
 extern volatile boot_cfg_t *b_cfg;
 extern volatile nyx_storage_t *nyx_str;
 
@@ -63,11 +65,14 @@ typedef struct _partition_ctxt_t
 	u32 l4t_size;
 	u32 and_size;
 	u32 hos_os_size;
+	u32 emu_sd_size;
 
 	u32 hos_sys_size_mb;
 	s32 hos_min_size_mb;
 
 	bool emu_double;
+	bool and_double;
+	bool emu_sd_double;
 	bool emmc_is_64gb;
 	bool auto_assign_free_storage;
 
@@ -81,24 +86,28 @@ typedef struct _partition_ctxt_t
 	lv_obj_t *bar_and;
 	lv_obj_t *bar_hos_os;
 	lv_obj_t *bar_remaining;
+	lv_obj_t *bar_emu_sd;
 
 	lv_obj_t *sep_emu;
 	lv_obj_t *sep_l4t;
 	lv_obj_t *sep_and;
 	lv_obj_t *sep_hos;
 	lv_obj_t *sep_remaining;
+	lv_obj_t *sep_emu_sd;
 
 	lv_obj_t *slider_bar_hos;
 	lv_obj_t *slider_emu;
 	lv_obj_t *slider_l4t;
 	lv_obj_t *slider_and;
 	lv_obj_t *slider_hos_os;
+	lv_obj_t *slider_emu_sd;
 
 	lv_obj_t *lbl_hos;
 	lv_obj_t *lbl_emu;
 	lv_obj_t *lbl_l4t;
 	lv_obj_t *lbl_and;
 	lv_obj_t *lbl_hos_os;
+	lv_obj_t *lbl_emu_sd;
 } partition_ctxt_t;
 
 typedef struct _l4t_flasher_ctxt_t
@@ -1884,7 +1893,7 @@ static lv_res_t _create_mbox_partitioning_next(lv_obj_t *btn) {
 
 static void _update_partition_bar()
 {
-	gfx_printf("update bar\n");
+	// TODO: 
 	lv_obj_t *h1 = lv_obj_get_parent(part_info.bar_hos);
 
 	// Set widths based on max bar width.
@@ -1894,6 +1903,7 @@ static void _update_partition_bar()
 	u32 bar_l4t_size       = lv_obj_get_width(h1) * (part_info.l4t_size >> 10) / total_size;
 	u32 bar_and_size       = lv_obj_get_width(h1) * (part_info.and_size >> 10) / total_size;
 	u32 bar_hos_os_size    = lv_obj_get_width(h1) * (part_info.hos_os_size >> 10) / total_size;
+	u32 bar_emu_sd_size    = lv_obj_get_width(h1) * (part_info.emu_sd_size >> 10) / total_size;
 	u32 bar_remaining_size = lv_obj_get_width(h1) - (bar_hos_size + bar_emu_size + bar_l4t_size + bar_and_size + bar_hos_os_size);
 
 	// Update bar widths.
@@ -1903,13 +1913,15 @@ static void _update_partition_bar()
 	lv_obj_set_size(part_info.bar_and, bar_and_size, LV_DPI / 2);
 	lv_obj_set_size(part_info.bar_hos_os, bar_hos_os_size, LV_DPI / 2);
 	lv_obj_set_size(part_info.bar_remaining, bar_remaining_size, LV_DPI / 2);
+	lv_obj_set_size(part_info.bar_emu_sd, bar_emu_sd_size, LV_DPI / 2);
 
 	// Re-align bars.
 	lv_obj_align(part_info.bar_hos, part_info.bar_hos_os, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 	lv_obj_align(part_info.bar_emu, part_info.bar_hos, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
-	lv_obj_align(part_info.bar_l4t, part_info.bar_emu, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+	lv_obj_align(part_info.bar_l4t, part_info.bar_emu_sd, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 	lv_obj_align(part_info.bar_and, part_info.bar_l4t, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 	lv_obj_align(part_info.bar_remaining, part_info.bar_and, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+	lv_obj_align(part_info.bar_emu_sd, part_info.bar_emu, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 
 	// Set emuMMC blending separator sizes and realign.
 	lv_obj_set_size(part_info.sep_emu, bar_emu_size ? 8 : 0, LV_DPI / 2);
@@ -1917,7 +1929,7 @@ static void _update_partition_bar()
 
 	// Set L4T blending separator sizes and realign.
 	lv_obj_set_size(part_info.sep_l4t, bar_l4t_size ? 8 : 0, LV_DPI / 2);
-	lv_obj_align(part_info.sep_l4t, part_info.bar_emu, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+	lv_obj_align(part_info.sep_l4t, part_info.bar_emu_sd, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
 	// Set Android blending separator sizes and realign.
 	lv_obj_set_size(part_info.sep_and, bar_and_size ? 8 : 0, LV_DPI / 2);
@@ -1930,24 +1942,27 @@ static void _update_partition_bar()
 	// Set Remaining blending separator
 	lv_obj_set_size(part_info.sep_remaining, bar_remaining_size ? 8 : 0, LV_DPI / 2);
 	lv_obj_align(part_info.sep_remaining, part_info.bar_and, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+
+	// Set emuSD blending separator
+	lv_obj_set_size(part_info.sep_emu_sd, bar_emu_sd_size ? 8 : 0, LV_DPI / 2);
+	lv_obj_align(part_info.sep_emu_sd, part_info.bar_emu, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 }
 
 static lv_res_t _action_slider_hos(lv_obj_t *slider){
-	gfx_printf("hos slider\n");
 	char lbl_text[64];
 
 	u32 size = (u32)lv_slider_get_value(slider) << 10;
 
-	if(size < part_info.hos_min_size_mb / 2){
+	if(size < (u32)part_info.hos_min_size_mb / 2){
 		size = 0;
-	}else if(size < part_info.hos_min_size_mb){
+	}else if(size < (u32)part_info.hos_min_size_mb){
 		size = part_info.hos_min_size_mb;
 	}
 
 	part_info.auto_assign_free_storage = size != 0;
 
 	if(size){
-		size = (part_info.total_sct >> 11) - 16 - part_info.and_size - part_info.emu_size - part_info.hos_os_size - part_info.l4t_size;
+		size = (part_info.total_sct >> 11) - 16 - part_info.and_size - part_info.emu_size - part_info.hos_os_size - part_info.l4t_size - part_info.emu_sd_size;
 	}
 
 	part_info.hos_size = size;
@@ -1973,13 +1988,13 @@ static lv_res_t _action_slider_hos_os(lv_obj_t *slider){
 		user_size = 4096;
 
 	u32 hos_os_size = user_size ? (user_size + part_info.hos_sys_size_mb) : 0;
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size - part_info.emu_sd_size;
 
 	// Sanitize sizes based on new HOS OS size.
 	if(!part_info.auto_assign_free_storage){
-		u32 total = part_info.and_size + part_info.hos_size + part_info.emu_size + part_info.l4t_size + hos_os_size;
+		u32 total = part_info.and_size + part_info.hos_size + part_info.emu_size + part_info.l4t_size + hos_os_size + part_info.emu_sd_size;
 		if(total > (part_info.total_sct >> 11) - 16){
-			hos_os_size = (part_info.total_sct >> 11) - 16 - part_info.l4t_size - part_info.and_size - part_info.emu_size - part_info.hos_size;
+			hos_os_size = (part_info.total_sct >> 11) - 16 - part_info.l4t_size - part_info.and_size - part_info.emu_size - part_info.hos_size - part_info.emu_sd_size;
 			lv_slider_set_value(slider, hos_os_size >> 10);
 		}
 	}else if (hos_size > part_info.hos_min_size_mb)
@@ -1989,8 +2004,8 @@ static lv_res_t _action_slider_hos_os(lv_obj_t *slider){
 	}
 	else
 	{
-		hos_os_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - part_info.hos_min_size_mb;
-		hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size;
+		hos_os_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - part_info.hos_min_size_mb - part_info.emu_sd_size;
+		hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size - part_info.emu_sd_size;
 		if (hos_size < part_info.hos_min_size_mb || hos_os_size < part_info.hos_sys_size_mb + 4096)
 		{
 			// something went wrong, hos_os_size smaller than minimum. set to what we had before
@@ -2025,42 +2040,54 @@ static lv_res_t _action_slider_emu(lv_obj_t *slider)
 	#define EMUMMC_64GB_FULL (59664 + 1) // 1MB extra for backup GPT.
 
 	static const u32 rsvd_mb = 4 + 4 + 16 + 8; // BOOT0 + BOOT1 + 16MB offset + 8MB alignment.
+	u32 max_emmc_size = !part_info.emmc_is_64gb ? EMUMMC_32GB_FULL : EMUMMC_64GB_FULL;
+
 	u32 size;
 	char lbl_text[64];
-	bool prev_emu_double = part_info.emu_double;
 	int slide_val = lv_slider_get_value(slider);
-	u32 max_emmc_size = !part_info.emmc_is_64gb ? EMUMMC_32GB_FULL : EMUMMC_64GB_FULL;
-	u32 step_size = max_emmc_size / 10;
 
-	part_info.emu_double = false;
+	int max_slider = lv_slider_get_max_value(slider);
 
-	size  = (slide_val > 10 ? (slide_val - 10) : slide_val);
-	size *= step_size;    // Convert to GB.
-	size = MAX(size, 4096);
-	size = ALIGN_DOWN(size, 1024);
-	size += rsvd_mb; // Add reserved size.
+	size = slide_val > (max_slider / 2) ? slide_val - (max_slider / 2) : slide_val;
+	size <<= 10;
 
-	if (!slide_val)
-		size = 0; // Reset if 0.
-	else if (slide_val >= 11)
-	{
-		size *= 2;
-		part_info.emu_double = true;
+	bool is_full = false;
+
+	// min 4Gb for emuMMC
+	if(size < 4096 / 2){
+		size = 0;
+	}else if(size < 4096){
+		size = 4096;
+	}else if(size <= max_emmc_size + 3072 && size >= max_emmc_size - 3072){
+		size = max_emmc_size;
+		is_full = true;
 	}
 
-	// Handle special cases. 2nd value is for 64GB Aula.
-	if (slide_val == 10)
-		size = max_emmc_size;
-	else if (slide_val == 20)
-		size = 2 * max_emmc_size;
+	bool emu_double = slide_val > max_slider / 2 && size;
+
+	if(size){
+		size += rsvd_mb; // Add reserved size.
+	}
+
+	if(emu_double){
+		size *= 2;
+	}
 
 	// Sanitize sizes based on new HOS size.
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - size - part_info.l4t_size - part_info.and_size - part_info.hos_os_size;
-	u32 total = part_info.l4t_size + part_info.and_size + part_info.hos_size + part_info.hos_os_size + size;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - size - part_info.emu_sd_size - part_info.l4t_size - part_info.and_size - part_info.hos_os_size;
+	u32 total = part_info.l4t_size + part_info.and_size + part_info.hos_size + part_info.hos_os_size + part_info.emu_sd_size + size;
 
 	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16))
 	{
 		part_info.emu_size = size;
+		part_info.emu_double	 = emu_double;
+
+		u32 temp_size = emu_double ? size / 2 : size;
+		// set slider value again manually if in the snapping region
+		if(temp_size <= 4096){
+			u32 new_val = part_info.emu_sd_double ? ((max_slider << 10) + part_info.emu_sd_size) / 2 : part_info.emu_sd_size;
+			lv_slider_set_value(slider, new_val >> 10);
+		}
 
 		if(part_info.auto_assign_free_storage){
 			part_info.hos_size = hos_size;
@@ -2069,41 +2096,91 @@ static lv_res_t _action_slider_emu(lv_obj_t *slider)
 			lv_bar_set_value(part_info.slider_bar_hos, hos_size >> 10);
 		}
 
-		if (!part_info.emu_double)
+		if (!emu_double)
 		{
-			if (slide_val != 10)
-				s_printf(lbl_text, "#FF3C28 %d GiB#", size >> 10);
-			else
+			if(is_full){
 				s_printf(lbl_text, "#FF3C28 %d FULL#", size >> 10);
+			}else{
+				s_printf(lbl_text, "#FF3C28 %d GiB#", size >> 10);
+			}
+		}else{
+			if(is_full){
+				s_printf(lbl_text, "#FFDD00 2x##FF3C28 %d FULL#", size >> 11);
+			}else{
+				s_printf(lbl_text, "#FFDD00 2x##FF3C28 %d GiB#", size >> 11);
+			}
 		}
-		else
-			s_printf(lbl_text, "#FFDD00 2x##FF3C28 %d#", size >> 11);
 		lv_label_set_text(part_info.lbl_emu, lbl_text);
 	}
 	else
 	{
-		u32 emu_size = part_info.emu_size;
+		// reset slider to old value
+		u32 old_val = part_info.emu_double ? ((max_slider << 10) + part_info.emu_size) / 2 : part_info.emu_size;
+		lv_slider_set_value(slider, old_val >> 10);
+	}
 
-		if (emu_size == max_emmc_size)
-			emu_size = 10;
-		else if (emu_size == 2 * max_emmc_size)
-			emu_size = 20;
-		else if (emu_size)
-		{
-			if (prev_emu_double)
-				emu_size /= 2;
-			emu_size -= rsvd_mb;
-			emu_size += 1023;
-			emu_size /= step_size;
+	_update_partition_bar();
 
-			if (prev_emu_double)
-				emu_size += 11;
+	return LV_RES_OK;
+}
+
+static lv_res_t _action_slider_emu_sd(lv_obj_t *slider){
+	u32 size;
+	char lbl_text[64];
+	int slide_val = lv_slider_get_value(slider);
+
+	int max_slider = lv_slider_get_max_value(slider);
+
+	size = slide_val > (max_slider / 2) ? slide_val - (max_slider / 2) : slide_val;
+	size <<= 10;
+
+	bool emu_sd_double = slide_val > max_slider / 2;
+
+	if(size< (u32)part_info.hos_min_size_mb / 2){
+		size = 0;
+	}else if(size < (u32)part_info.hos_min_size_mb){
+		size = part_info.hos_min_size_mb;
+	}
+
+	if(emu_sd_double){
+		size *= 2;
+	}
+
+	// Sanitize sizes based on new HOS size.
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - size - part_info.emu_size	- part_info.l4t_size - part_info.and_size - part_info.hos_os_size;
+	u32 total = part_info.l4t_size + part_info.and_size + part_info.hos_size + part_info.hos_os_size + part_info.emu_size + size;
+
+	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16))
+	{
+		part_info.emu_sd_size = size;
+		part_info.emu_sd_double	 = emu_sd_double;
+
+		u32 temp_size = emu_sd_double ? size / 2 : size;
+		if(temp_size <= (u32)part_info.hos_min_size_mb){
+			u32 new_val = part_info.emu_sd_double ? ((max_slider << 10) + part_info.emu_sd_size) / 2 : part_info.emu_sd_size;
+			lv_slider_set_value(slider, new_val >> 10);
 		}
 
-		int new_slider_val = emu_size;
-		part_info.emu_double = prev_emu_double ? true : false;
+		if(part_info.auto_assign_free_storage){
+			part_info.hos_size = hos_size;
+			s_printf(lbl_text, "#96FF00 %d GiB#", hos_size >> 10);
+			lv_label_set_text(part_info.lbl_hos, lbl_text);
+			lv_bar_set_value(part_info.slider_bar_hos, hos_size >> 10);
+		}
 
-		lv_slider_set_value(slider, new_slider_val);
+		if (!emu_sd_double)
+		{
+			s_printf(lbl_text, "#ff00d6 %d GiB#", size >> 10);
+		}else{
+			s_printf(lbl_text, "#FFDD00 2x##ff00d6 %d GiB#", size >> 11);
+		}
+		lv_label_set_text(part_info.lbl_emu_sd, lbl_text);
+	}
+	else
+	{
+		// reset slider to old value
+		u32 old_val = part_info.emu_sd_double ? ((max_slider << 10) + part_info.emu_sd_size) / 2 : part_info.emu_sd_size;
+		lv_slider_set_value(slider, old_val >> 10);
 	}
 
 	_update_partition_bar();
@@ -2121,13 +2198,13 @@ static lv_res_t _action_slider_l4t(lv_obj_t *slider)
 	else if (size < 8192)
 		size = 8192;
 
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - part_info.hos_os_size - part_info.emu_size - size - part_info.and_size;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - part_info.hos_os_size - part_info.emu_size - size - part_info.and_size - part_info.emu_sd_size;
 
 	// Sanitize sizes based on new HOS size.
 	if(!part_info.auto_assign_free_storage){
-		u32 total = part_info.and_size + part_info.hos_os_size + part_info.emu_size + part_info.hos_size + size;
+		u32 total = part_info.and_size + part_info.hos_os_size + part_info.emu_size + part_info.hos_size + size + part_info.emu_sd_size;
 		if(total > (part_info.total_sct >> 11) - 16){
-			size = (part_info.total_sct >> 11) - 16 - part_info.hos_os_size - part_info.and_size - part_info.emu_size - part_info.hos_size;
+			size = (part_info.total_sct >> 11) - 16 - part_info.hos_os_size - part_info.and_size - part_info.emu_size - part_info.hos_size - part_info.emu_sd_size;
 			lv_slider_set_value(slider, size >> 10);
 		}
 	}else if (hos_size > part_info.hos_min_size_mb)
@@ -2137,8 +2214,8 @@ static lv_res_t _action_slider_l4t(lv_obj_t *slider)
 	}
 	else
 	{
-		size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - 2048;
-		hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - size;
+		size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - part_info.emu_sd_size - 2048;
+		hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - size - part_info.emu_sd_size;
 		if (hos_size < part_info.hos_min_size_mb || size < 8192)
 		{
 			lv_slider_set_value(slider, part_info.l4t_size >> 10);
@@ -2167,58 +2244,80 @@ out:
 
 static lv_res_t _action_slider_and(lv_obj_t *slider)
 {
+	u32 user_size;
+	u32 and_size;
 	char lbl_text[64];
+	int slide_val = lv_slider_get_value(slider);
 
-	u32 user_size = (u32)lv_slider_get_value(slider) << 10;
-	if (user_size < 2048)
+	int max_slider = lv_slider_get_max_value(slider);
+
+	#ifdef ENABLE_DUAL_ANDROID
+	user_size = slide_val > (max_slider / 2) ? slide_val - (max_slider / 2) : slide_val;
+	#else
+	user_size = slide_val;
+	#endif
+	user_size <<= 10;
+
+	if(user_size < 4096 / 2){
 		user_size = 0;
-	else if (user_size < 4096)
+	}else if(user_size < 4096){
 		user_size = 4096;
+	}
 
-	u32 and_size = user_size ? (user_size + ANDROID_SYSTEM_SIZE_MB) : 0;
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.hos_os_size - and_size;
+	#ifdef ENABLE_DUAL_ANDROID
+	bool and_double = slide_val > max_slider / 2 && user_size;
+	#else
+	bool and_double = false;
+	#endif
+
+	and_size = 0;
+	if(user_size){
+		and_size = user_size + ANDROID_SYSTEM_SIZE_MB;
+	}
+
+	if(and_double){
+		and_size *= 2;
+	};
 
 	// Sanitize sizes based on new HOS size.
-	if(!part_info.auto_assign_free_storage){
-		u32 total = part_info.l4t_size + part_info.hos_os_size + part_info.emu_size + part_info.hos_size + and_size;
-		if(total > (part_info.total_sct >> 11) - 16){
-			and_size = (part_info.total_sct >> 11) - 16 - part_info.l4t_size - part_info.hos_os_size - part_info.emu_size - part_info.hos_size;
-			user_size = and_size - ANDROID_SYSTEM_SIZE_MB;
-			lv_slider_set_value(slider, user_size >> 10);
-		}
-	}else if(hos_size > part_info.hos_min_size_mb)
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - and_size - part_info.emu_size	- part_info.l4t_size - part_info.emu_sd_size - part_info.hos_os_size;
+	u32 total = part_info.l4t_size + part_info.emu_sd_size + part_info.hos_size + part_info.hos_os_size + part_info.emu_size + and_size;
+
+	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16))
 	{
-		if (user_size <= 4096)
-			lv_slider_set_value(slider, user_size >> 10);
+		part_info.and_size = and_size;
+		part_info.and_double = and_double;
+
+		if(user_size <= 4096){
+			u32 new_val = part_info.and_double ? (max_slider << 10) / 2 + user_size : user_size;
+			lv_slider_set_value(slider, new_val >> 10);
+		}
+
+		if(part_info.auto_assign_free_storage){
+			part_info.hos_size = hos_size;
+			s_printf(lbl_text, "#96FF00 %d GiB#", hos_size >> 10);
+			lv_label_set_text(part_info.lbl_hos, lbl_text);
+			lv_bar_set_value(part_info.slider_bar_hos, hos_size >> 10);
+		}
+
+		if (!and_double)
+		{
+			s_printf(lbl_text, "#FF8000 %d GiB#", user_size >> 10);
+		}else{
+			s_printf(lbl_text, "#FFDD00 2x##FF8000 %d GiB#", user_size >> 10);
+		}
+		lv_label_set_text(part_info.lbl_and, lbl_text);
 	}
 	else
 	{
-		and_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.l4t_size - 2048;
-		hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.l4t_size - and_size;
-		if (hos_size < part_info.hos_min_size_mb || and_size < 8192)
-		{
-			lv_slider_set_value(slider, (part_info.and_size - ANDROID_SYSTEM_SIZE_MB) >> 10);
-			goto out;
-		}
-		user_size = and_size - ANDROID_SYSTEM_SIZE_MB;
-		lv_slider_set_value(slider, user_size >> 10);
+		// reset slider to old value
+		u32 old_val = part_info.and_double ? ((max_slider << 10) + part_info.and_size) / 2 : part_info.and_size;
+		old_val -= ANDROID_SYSTEM_SIZE_MB;
+		lv_slider_set_value(slider, old_val >> 10);
 	}
-
-	part_info.and_size = and_size;
-
-	if(part_info.auto_assign_free_storage){
-		part_info.hos_size = hos_size;
-		s_printf(lbl_text, "#96FF00 %d GiB#", hos_size >> 10);
-		lv_label_set_text(part_info.lbl_hos, lbl_text);
-		lv_bar_set_value(part_info.slider_bar_hos, hos_size >> 10);
-	}
-
-	s_printf(lbl_text, "#FF8000 %d GiB#", user_size >> 10);
-	lv_label_set_text(part_info.lbl_and, lbl_text);
 
 	_update_partition_bar();
 
-out:
 	return LV_RES_OK;
 }
 
@@ -2839,10 +2938,10 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 		lv_win_add_btn(win, NULL, SYMBOL_MODULES_ALT" Fix Hybrid MBR", _action_fix_mbr);
 	}
 
-	static lv_style_t bar_hos_os_bg, bar_hos_bg, bar_emu_bg, bar_l4t_bg, bar_and_bg;
-	static lv_style_t bar_hos_os_ind, bar_hos_ind, bar_emu_ind, bar_l4t_ind, bar_and_ind, bar_remaining_ind;
-	static lv_style_t bar_hos_os_btn, bar_hos_btn, bar_emu_btn, bar_l4t_btn, bar_and_btn;
-	static lv_style_t sep_emu_bg, sep_l4t_bg, sep_and_bg, sep_hos_bg, sep_remaining_bg;
+	static lv_style_t bar_hos_os_bg, bar_hos_bg, bar_emu_bg, bar_l4t_bg, bar_and_bg, bar_emu_sd_bg;
+	static lv_style_t bar_hos_os_ind, bar_hos_ind, bar_emu_ind, bar_l4t_ind, bar_and_ind, bar_remaining_ind, bar_emu_sd_ind;
+	static lv_style_t bar_hos_os_btn, bar_hos_btn, bar_emu_btn, bar_l4t_btn, bar_and_btn, bar_emu_sd_btn;
+	static lv_style_t sep_emu_bg, sep_l4t_bg, sep_and_bg, sep_hos_bg, sep_remaining_bg, sep_emu_sd_bg;
 
 	// Set HOS bar styles.
 	lv_style_copy(&bar_hos_bg, lv_theme_get_current()->bar.bg);
@@ -2918,6 +3017,20 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_style_copy(&sep_hos_bg, &sep_emu_bg);
 	sep_hos_bg.body.main_color = LV_COLOR_HEX(0xffd300);
 	sep_hos_bg.body.grad_color = sep_hos_bg.body.main_color;
+
+	// Set emuSD bar styles.
+	lv_style_copy(&bar_emu_sd_bg, lv_theme_get_current()->bar.bg);
+	bar_emu_sd_bg.body.main_color = LV_COLOR_HEX(0x96007e);
+	bar_emu_sd_bg.body.grad_color = bar_emu_sd_bg.body.main_color;
+	lv_style_copy(&bar_emu_sd_ind, lv_theme_get_current()->bar.indic);
+	bar_emu_sd_ind.body.main_color = LV_COLOR_HEX(0xff00d6);
+	bar_emu_sd_ind.body.grad_color = bar_emu_sd_ind.body.main_color;
+	lv_style_copy(&bar_emu_sd_btn, lv_theme_get_current()->slider.knob);
+	bar_emu_sd_btn.body.main_color = LV_COLOR_HEX(0xc700a7);
+	bar_emu_sd_btn.body.grad_color = bar_emu_sd_btn.body.main_color;
+	lv_style_copy(&sep_emu_sd_bg, &sep_emu_bg);
+	sep_emu_sd_bg.body.main_color = LV_COLOR_HEX(0xff00d6);
+	sep_emu_sd_bg.body.grad_color = sep_emu_sd_bg.body.main_color;
 
 	lv_obj_t *sep = lv_label_create(win, NULL);
 	lv_label_set_static_text(sep, "");
@@ -3007,6 +3120,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 
 
 	u32 total_size         = (part_info.total_sct - AU_ALIGN_SECTORS) / SECTORS_PER_GB;
+	u32 bar_emu_sd_size    = lv_obj_get_width(h1) * (part_info.emu_sd_size >> 10) / total_size;
 	u32 bar_hos_size       = lv_obj_get_width(h1) * (part_info.hos_size    >> 10) / total_size;
 	u32 bar_emu_size       = lv_obj_get_width(h1) * (part_info.emu_size    >> 10) / total_size;
 	u32 bar_l4t_size       = lv_obj_get_width(h1) * (part_info.l4t_size    >> 10) / total_size;
@@ -3042,11 +3156,18 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_obj_align(bar_emu, bar_hos, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 	part_info.bar_emu = bar_emu;
 
+	// emuSD partition block
+	lv_obj_t *bar_emu_sd = lv_bar_create(h1, bar_hos_os);
+	lv_obj_set_size(bar_emu_sd, bar_emu_sd_size, LV_DPI / 2);
+	lv_bar_set_style(bar_emu_sd, LV_BAR_STYLE_INDIC, &bar_emu_sd_ind);
+	lv_obj_align(bar_emu_sd, bar_emu, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+	part_info.bar_emu_sd = bar_emu_sd;
+
 	// L4T partition block.
 	lv_obj_t *bar_l4t = lv_bar_create(h1, bar_hos_os);
 	lv_obj_set_size(bar_l4t, bar_l4t_size, LV_DPI / 2);
 	lv_bar_set_style(bar_l4t, LV_BAR_STYLE_INDIC, &bar_l4t_ind);
-	lv_obj_align(bar_l4t, bar_emu, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+	lv_obj_align(bar_l4t, bar_emu_sd, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 	part_info.bar_l4t = bar_l4t;
 
 	// Android partition block.
@@ -3063,6 +3184,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_obj_align(bar_remaining, bar_and, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
 	part_info.bar_remaining = bar_remaining;
 
+	// -------------------------------------------------------------------------
 	// Create disk layout blending separators.
 	lv_obj_t *sep_hos = lv_cont_create(h1, NULL);
 	lv_cont_set_fit(sep_hos, false, false);
@@ -3071,6 +3193,11 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_obj_align(sep_hos, bar_hos_os, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 	part_info.sep_hos = sep_hos;
 
+	lv_obj_t *sep_emu_sd = lv_cont_create(h1, sep_hos);
+	lv_obj_set_style(sep_emu_sd, &sep_emu_sd_bg);
+	lv_obj_align(sep_emu_sd, bar_emu, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+	part_info.sep_emu_sd = sep_emu_sd;
+
 	lv_obj_t *sep_emu = lv_cont_create(h1, sep_hos);
 	lv_obj_set_style(sep_emu, &sep_emu_bg);
 	lv_obj_align(sep_emu, bar_hos, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
@@ -3078,7 +3205,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 
 	lv_obj_t *sep_l4t = lv_cont_create(h1, sep_emu);
 	lv_obj_set_style(sep_l4t, &sep_l4t_bg);
-	lv_obj_align(sep_l4t, bar_emu, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
+	lv_obj_align(sep_l4t, bar_emu_sd, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 	part_info.sep_l4t = sep_l4t;
 
 	lv_obj_t *sep_and = lv_cont_create(h1, sep_emu);
@@ -3098,10 +3225,12 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_obj_align(lbl_hos_os, bar_hos_os, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 2);
 	lv_obj_set_hidden(lbl_hos_os, !has_hos_os);
 
-	lv_coord_t spacing = (LV_DPI / 3);
+	lv_coord_t spacing;
 	if(has_hos_os){
 		// adjust spacing when we have 5 sliders
-		spacing -= (lv_obj_get_height(lbl_hos_os) + LV_DPI / 3) / 4;
+		spacing = (LV_DPI / 3) - (lv_obj_get_height(lbl_hos_os) + LV_DPI / 3) / 3;
+	}else{
+		spacing = (LV_DPI / 3) - (lv_obj_get_height(lbl_hos_os) + LV_DPI / 3) / 4;
 	}
 	
 	lv_obj_t *lbl_hos = lv_label_create(h1, NULL);
@@ -3113,19 +3242,25 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_label_set_static_text(lbl_emu, "#FF3C28 "SYMBOL_DOT" emuMMC (RAW):#");
 	lv_obj_align(lbl_emu, lbl_hos, LV_ALIGN_OUT_BOTTOM_LEFT, 0, spacing);
 
+	lv_obj_t *lbl_emu_sd = lv_label_create(	h1, lbl_hos);
+	lv_label_set_static_text(lbl_emu_sd, "#FF00D6 " SYMBOL_DOT " emuSD:#");
+	lv_obj_align(lbl_emu_sd, lbl_emu, LV_ALIGN_OUT_BOTTOM_LEFT, 0, spacing);
+	lv_obj_set_hidden(lbl_emu_sd, drive == DRIVE_SD);
+
 	lv_obj_t *lbl_l4t = lv_label_create(h1, lbl_hos);
 	lv_label_set_static_text(lbl_l4t, "#00DDFF "SYMBOL_DOT" Linux (EXT4):#");
-	lv_obj_align(lbl_l4t, lbl_emu, LV_ALIGN_OUT_BOTTOM_LEFT, 0, spacing);
+	lv_obj_align(lbl_l4t, drive == DRIVE_SD ? lbl_emu : lbl_emu_sd, LV_ALIGN_OUT_BOTTOM_LEFT, 0, spacing);
 
 	lv_obj_t *lbl_and = lv_label_create(h1, lbl_hos);
 	lv_label_set_static_text(lbl_and, "#FF8000 "SYMBOL_DOT" Android (USER):#");
 	lv_obj_align(lbl_and, lbl_l4t, LV_ALIGN_OUT_BOTTOM_LEFT, 0, spacing);
 
+
 	// Create HOS OS size slider
 	lv_obj_t *slider_hos_os = lv_slider_create(h1, NULL);
 	lv_obj_set_size(slider_hos_os, LV_DPI * 7, LV_DPI / 3);
 	lv_slider_set_range(slider_hos_os, 0, (part_info.total_sct - AU_ALIGN_SECTORS) / SECTORS_PER_GB);
-	lv_slider_set_value(slider_hos_os, part_info.hos_os_size >> 11);
+	lv_slider_set_value(slider_hos_os, part_info.hos_os_size >> 10);
 	lv_slider_set_style(slider_hos_os, LV_SLIDER_STYLE_BG, &bar_hos_os_bg);
 	lv_slider_set_style(slider_hos_os, LV_SLIDER_STYLE_INDIC, &bar_hos_os_ind);
 	lv_slider_set_style(slider_hos_os, LV_SLIDER_STYLE_KNOB, &bar_hos_os_btn);
@@ -3147,7 +3282,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 		lv_obj_set_size(slider_hos, LV_DPI * 7, LV_DPI * 3 / 17);
 	}
 	lv_bar_set_range(slider_hos, 0, (part_info.total_sct - AU_ALIGN_SECTORS) / SECTORS_PER_GB);
-	lv_bar_set_value(slider_hos, part_info.hos_size);
+	lv_bar_set_value(slider_hos, part_info.hos_size >> 10);
 	lv_bar_set_style(slider_hos, LV_SLIDER_STYLE_BG, &bar_hos_bg);
 	lv_bar_set_style(slider_hos, LV_SLIDER_STYLE_INDIC, &bar_hos_ind);
 	lv_obj_align(slider_hos, lbl_hos, LV_ALIGN_IN_LEFT_MID, LV_DPI * 3, 0);
@@ -3157,8 +3292,8 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	// Create emuMMC size slider.
 	lv_obj_t *slider_emu = lv_slider_create(h1, NULL);
 	lv_obj_set_size(slider_emu, LV_DPI * 7, LV_DPI / 3);
-	lv_slider_set_range(slider_emu, 0, 20);
-	lv_slider_set_value(slider_emu, 0);
+	lv_slider_set_range(slider_emu, 0, ((part_info.total_sct - AU_ALIGN_SECTORS) / SECTORS_PER_GB) * 2);
+	lv_slider_set_value(slider_emu, part_info.emu_size >> 10);
 	lv_slider_set_style(slider_emu, LV_SLIDER_STYLE_BG, &bar_emu_bg);
 	lv_slider_set_style(slider_emu, LV_SLIDER_STYLE_INDIC, &bar_emu_ind);
 	lv_slider_set_style(slider_emu, LV_SLIDER_STYLE_KNOB, &bar_emu_btn);
@@ -3170,7 +3305,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_obj_t *slider_l4t = lv_slider_create(h1, NULL);
 	lv_obj_set_size(slider_l4t, LV_DPI * 7, LV_DPI / 3);
 	lv_slider_set_range(slider_l4t, 0, (part_info.total_sct - extra_sct) / SECTORS_PER_GB);
-	lv_slider_set_value(slider_l4t, 0);
+	lv_slider_set_value(slider_l4t, part_info.l4t_size >> 10);
 	lv_slider_set_style(slider_l4t, LV_SLIDER_STYLE_BG, &bar_l4t_bg);
 	lv_slider_set_style(slider_l4t, LV_SLIDER_STYLE_INDIC, &bar_l4t_ind);
 	lv_slider_set_style(slider_l4t, LV_SLIDER_STYLE_KNOB, &bar_l4t_btn);
@@ -3181,14 +3316,31 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	// Create Android size slider.
 	lv_obj_t *slider_and = lv_slider_create(h1, NULL);
 	lv_obj_set_size(slider_and, LV_DPI * 7, LV_DPI / 3);
+	#ifdef ENABLE_DUAL_ANDROID
+	lv_slider_set_range(slider_and, 0, ((part_info.total_sct - extra_sct) / SECTORS_PER_GB - 4) * 2); // Subtract android reserved size.
+	#else
 	lv_slider_set_range(slider_and, 0, (part_info.total_sct - extra_sct) / SECTORS_PER_GB - 4); // Subtract android reserved size.
-	lv_slider_set_value(slider_and, 0);
+	#endif
+	lv_slider_set_value(slider_and, part_info.and_size >> 10);
 	lv_slider_set_style(slider_and, LV_SLIDER_STYLE_BG, &bar_and_bg);
 	lv_slider_set_style(slider_and, LV_SLIDER_STYLE_INDIC, &bar_and_ind);
 	lv_slider_set_style(slider_and, LV_SLIDER_STYLE_KNOB, &bar_and_btn);
 	lv_obj_align(slider_and, lbl_and, LV_ALIGN_IN_LEFT_MID, LV_DPI * 3, 0);
 	lv_slider_set_action(slider_and, _action_slider_and);
 	part_info.slider_and = slider_and;
+
+	// Create emuSD size slider
+	lv_obj_t *slider_emu_sd = lv_slider_create(h1, NULL);
+	lv_obj_set_size(slider_emu_sd, LV_DPI * 7, LV_DPI / 3);
+	lv_slider_set_range(slider_emu_sd, 0, ((part_info.total_sct - extra_sct) / SECTORS_PER_GB) * 2); // Subtract android reserved size.
+	lv_slider_set_value(slider_emu_sd, part_info.emu_sd_size >> 10);
+	lv_slider_set_style(slider_emu_sd, LV_SLIDER_STYLE_BG, &bar_emu_sd_bg);
+	lv_slider_set_style(slider_emu_sd, LV_SLIDER_STYLE_INDIC, &bar_emu_sd_ind);
+	lv_slider_set_style(slider_emu_sd, LV_SLIDER_STYLE_KNOB, &bar_emu_sd_btn);
+	lv_obj_align(slider_emu_sd, lbl_emu_sd, LV_ALIGN_IN_LEFT_MID, LV_DPI * 3, 0);
+	lv_slider_set_action(slider_emu_sd, _action_slider_emu_sd);
+	lv_obj_set_hidden(slider_emu_sd, drive == DRIVE_SD);
+	part_info.slider_emu_sd = slider_emu_sd;
 
 	// Create HOS OS size lable
 	lv_obj_t *lbl_sl_hos_os = lv_label_create(h1, NULL);
@@ -3224,6 +3376,13 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_label_set_text(lbl_sl_and, "#FF8000 0 GiB#");
 	lv_obj_align(lbl_sl_and, slider_and, LV_ALIGN_OUT_RIGHT_MID, LV_DPI * 4 / 7, 0);
 	part_info.lbl_and = lbl_sl_and;
+
+	// Create emuSD size label
+	lv_obj_t *lbl_sl_emu_sd = lv_label_create(h1, lbl_sl_hos);
+	lv_label_set_text(lbl_sl_emu_sd, "#FF00D6 0 GiB#");
+	lv_obj_align(lbl_sl_emu_sd, slider_emu_sd, LV_ALIGN_OUT_RIGHT_MID, LV_DPI * 4 / 7, 0);
+	lv_obj_set_hidden(lbl_sl_emu_sd, drive == DRIVE_SD);
+	part_info.lbl_emu_sd = lbl_sl_emu_sd;
 
 	// Set partition manager notes.
 	const char *sd_notes = 
