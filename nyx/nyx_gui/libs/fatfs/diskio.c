@@ -16,6 +16,7 @@
 
 #include <libs/fatfs/diskio.h>	/* FatFs lower layer API */
 #include <fatfs_cfg.h>
+#include "../../storage/sfd.h"
 
 static u32 sd_rsvd_sectors = 0;
 static u32 ramdisk_sectors = 0;
@@ -35,6 +36,7 @@ static bool ensure_partition(BYTE pdrv){
 	case DRIVE_RAM:
 	case DRIVE_BIS:
 	case DRIVE_EMU:
+	case DRIVE_SFD:
 		return true;
 	default:
 		return false;
@@ -96,6 +98,8 @@ DRESULT disk_read (
 		return sdmmc_storage_read(&emmc_storage, sector + (0x100000 / 512), count, buff) ? RES_OK : RES_ERROR;
 	case DRIVE_BOOT1:
 		return sdmmc_storage_read(&emmc_storage, sector, count, buff) ? RES_OK : RES_ERROR;
+	case DRIVE_SFD:
+		return sfd_read(sector, count ,buff) ? RES_OK : RES_ERROR;
 	}
 
 	return RES_ERROR;
@@ -130,6 +134,8 @@ DRESULT disk_write (
 		return sdmmc_storage_write(&emmc_storage, sector + (0x100000 / 512), count, (void*)buff) ? RES_OK : RES_ERROR;
 	case DRIVE_BOOT1:
 		return sdmmc_storage_write(&emmc_storage, sector, count, (void*)buff) ? RES_OK : RES_ERROR;
+	case DRIVE_SFD:
+		return sfd_write(sector, count, (void*)buff) ? RES_OK : RES_ERROR;
 	}
 
 	return RES_ERROR;

@@ -1,0 +1,14 @@
+#ifndef _SFD_H
+#define _SFD_H
+
+#include <storage/sdmmc.h>
+#include <utils/types.h>
+
+int sfd_read(u32 sector, u32 count, void *buff);
+int sfd_write(u32 sector, u32 count, void *buff);
+
+bool sfd_init(sdmmc_storage_t *storage, u32 offset, u32 size);
+void sfd_end();
+
+
+#endif
