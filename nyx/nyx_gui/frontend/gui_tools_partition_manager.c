@@ -1912,7 +1912,7 @@ static void _update_partition_bar()
 	lv_obj_set_size(part_info.bar_l4t, bar_l4t_size, LV_DPI / 2);
 	lv_obj_set_size(part_info.bar_and, bar_and_size, LV_DPI / 2);
 	lv_obj_set_size(part_info.bar_hos_os, bar_hos_os_size, LV_DPI / 2);
-	lv_obj_set_size(part_info.bar_remaining, bar_remaining_size, LV_DPI / 2);
+	lv_obj_set_size(part_info.bar_remaining, bar_remaining_size > 4 ? bar_remaining_size : 0, LV_DPI / 2);
 	lv_obj_set_size(part_info.bar_emu_sd, bar_emu_sd_size, LV_DPI / 2);
 
 	// Re-align bars.
@@ -1940,7 +1940,7 @@ static void _update_partition_bar()
 	lv_obj_align(part_info.sep_hos, part_info.bar_hos_os, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
 	// Set Remaining blending separator
-	lv_obj_set_size(part_info.sep_remaining, bar_remaining_size ? 8 : 0, LV_DPI / 2);
+	lv_obj_set_size(part_info.sep_remaining, bar_remaining_size > 4 ? 8 : 0, LV_DPI / 2);
 	lv_obj_align(part_info.sep_remaining, part_info.bar_and, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
 	// Set emuSD blending separator
