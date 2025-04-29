@@ -21,6 +21,7 @@
 static u32 sd_rsvd_sectors = 0;
 static u32 ramdisk_sectors = 0;
 static u32 emummc_sectors = 0;
+static u32 sfd_sectors = 0;
 
 static bool ensure_partition(BYTE pdrv){
 	u8 part;
@@ -99,7 +100,7 @@ DRESULT disk_read (
 	case DRIVE_BOOT1:
 		return sdmmc_storage_read(&emmc_storage, sector, count, buff) ? RES_OK : RES_ERROR;
 	case DRIVE_SFD:
-		return sfd_read(sector, count ,buff) ? RES_OK : RES_ERROR;
+		return sfd_read(sector, count, buff) ? RES_OK : RES_ERROR;
 	}
 
 	return RES_ERROR;
@@ -187,8 +188,16 @@ DRESULT disk_ioctl (
 			*buf = 32768; // Align to 16MB.
 			break;
 		}
-	}
-	else // Catch all for unknown devices.
+	}else if(pdrv == DRIVE_SFD){
+		switch(cmd){
+		case GET_SECTOR_COUNT:
+			*buf = sfd_sectors;
+			break;
+		case GET_BLOCK_SIZE:
+			*buf = 32768;
+			break;
+		}
+	}else // Catch all for unknown devices.
 	{
 		switch (cmd)
 		{
@@ -224,6 +233,9 @@ DRESULT disk_set_info (
 			break;
 		case DRIVE_EMU:
 			emummc_sectors = *buf;
+			break;
+		case DRIVE_SFD:
+			sfd_sectors = *buf;
 			break;
 		}
 	}

@@ -21,11 +21,13 @@
 #include <mem/heap.h>
 #include <soc/fuse.h>
 #include <storage/mbr_gpt.h>
+#include <gfx_utils.h>
 #include <utils/list.h>
 
 static u16 emmc_errors[3] = { 0 }; // Init and Read/Write errors.
 static u32 emmc_mode = EMMC_MMC_HS400;
 static bool emmc_init_done = false;
+static bool emmc_mounted = false;
 
 sdmmc_t emmc_sdmmc;
 sdmmc_storage_t emmc_storage;
@@ -62,14 +64,22 @@ u32 emmc_get_mode()
 	return emmc_mode;
 }
 
-static void _emmc_deinit(){
+static void _emmc_deinit(bool deinit){
 	if(emmc_init_done){
-		sdmmc_storage_end(&emmc_storage);
-		emmc_init_done = false;
+		// TODO: Allow unmount even when not init'd?
+		if(emmc_mounted){
+			f_mount(NULL, "emmc:", 0);
+		}
+
+		if(deinit){
+			sdmmc_storage_end(&emmc_storage);
+			emmc_init_done = false;
+		}
 	}
+	emmc_mounted = false;
 }
 
-void emmc_end() { _emmc_deinit(); }
+void emmc_end() { _emmc_deinit(true); }
 
 bool emmc_get_initialized(){
 	return emmc_init_done;
@@ -243,3 +253,44 @@ void nx_emmc_get_autorcm_masks(u8 *mod0, u8 *mod1)
 		*mod1 = 0x84;
 	}
 }
+
+
+bool emmc_mount()
+{
+	if (emmc_init_done && emmc_mounted)
+		return true;
+
+	int res = 0;
+
+	if (!emmc_init_done)
+		res = !emmc_initialize(false);
+
+	if (res)
+	{
+		gfx_con.mute = false;
+		EPRINTF("Failed to init eMMC.");
+	}
+	else
+	{
+		if (!emmc_mounted)
+			res = f_mount(&emmc_fs, "emmc:", 1); // Volume 0 is SD.
+		if (res == FR_OK)
+		{
+			emmc_mounted = true;
+			return true;
+		}
+		else
+		{
+			gfx_con.mute = false;
+			EPRINTFARGS("Failed to mount eMMC (FatFS Error %d).\nMake sure that a FAT partition exists..", res);
+		}
+	}
+
+	return false;
+}
+
+bool emmc_get_mounted(){
+	return emmc_mounted;
+}
+
+void emmc_unmount() { _emmc_deinit(false); }

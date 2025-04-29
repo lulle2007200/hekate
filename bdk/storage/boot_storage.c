@@ -27,7 +27,16 @@ static bool _is_eligible(){
 } 
 
 bool boot_storage_get_mounted(){
-	return drive != DEV_INVALID;
+	switch(drive){
+	case DRIVE_SD:
+		return sd_get_card_mounted();
+	case DRIVE_EMMC:
+		return emmc_get_mounted();
+	case DRIVE_BOOT1:
+	case DRIVE_BOOT1_1MB:
+		return drive != DEV_INVALID;
+	}
+	return false;
 }
 
 bool boot_storage_get_initialized(){
@@ -51,23 +60,36 @@ static bool _boot_storage_initialize(){
 	case DRIVE_SD:
 		return sd_initialize(false);
 	}
+
 	return false;
 }
 
 static void _boot_storage_end(bool deinit){
 	if(boot_storage_get_mounted()){
-		if(drive == DRIVE_SD){
+		switch(drive){
+		case DRIVE_SD:
 			sd_unmount();
-		}else{
-			f_mount(NULL, drive_base_paths[drive], false);
+			break;
+		case DRIVE_EMMC:
+			emmc_unmount();
+			break;
+		case DRIVE_BOOT1:
+		case DRIVE_BOOT1_1MB:
+			f_mount(NULL, drive_base_paths[drive], 0);
 		}
 		drive = DEV_INVALID;
 	}
+
 	if(deinit){
-		if(drive == DRIVE_SD){
+		switch(drive){
+		case DRIVE_SD:
 			sd_end();
-		}else{
+			break;
+		case DRIVE_EMMC:
+		case DRIVE_BOOT1:
+		case DRIVE_BOOT1_1MB:
 			emmc_end();
+			break;
 		}
 	}
 }
@@ -93,7 +115,7 @@ static bool _boot_storage_mount(){
 		goto emmc_init_fail;
 	}
 
-	static const BYTE emmc_drives[] = {DRIVE_BOOT1_1MB, DRIVE_BOOT1, DRIVE_EMMC}; 
+	static const BYTE emmc_drives[] = {DRIVE_BOOT1_1MB, DRIVE_BOOT1}; 
 
 	for(BYTE i = 0; i < ARRAY_SIZE(emmc_drives); i++){
 		res = f_mount(&boot_storage_fs, drive_base_paths[emmc_drives[i]], true);
@@ -121,14 +143,28 @@ static bool _boot_storage_mount(){
 	}
 
 emmc_init_fail:
-	gfx_printf("trying %s\n", drive_base_paths[DRIVE_SD]);
+	if(!emmc_initialize(false)){
+		goto emmc_init_fail2;
+	}
+
+	if(!emmc_mount()){
+		emmc_end();
+		goto emmc_init_fail2;
+	}
+
+	res = f_chdrive(drive_base_paths[DRIVE_EMMC]);
+
+	if(res == FR_OK && _is_eligible()){
+		drive = DRIVE_EMMC;
+		return true;
+	}
+
+emmc_init_fail2:
 	if(!sd_initialize(false)){
-		gfx_printf("%s fail\n", drive_base_paths[DRIVE_SD]);
 		goto out;
 	}
 
 	if(!sd_mount()){
-		gfx_printf("%s fail\n", drive_base_paths[DRIVE_SD]);
 		sd_end();
 		goto out;
 	}
@@ -136,7 +172,6 @@ emmc_init_fail:
 	res = f_chdrive(drive_base_paths[DRIVE_SD]);
 
 	if(res == FR_OK && _is_eligible()){
-		gfx_printf("%s ok\n", drive_base_paths[DRIVE_SD]);
 		drive = DRIVE_SD;
 		return true;
 	}

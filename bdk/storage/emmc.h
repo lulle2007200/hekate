@@ -65,7 +65,10 @@ int  emmc_init_retry(bool power_cycle);
 bool emmc_initialize(bool power_cycle);
 int  emmc_set_partition(u32 partition);
 void emmc_end();
+bool emmc_mount();
+void emmc_unmount();
 bool emmc_get_initialized();
+bool emmc_get_mounted();
 
 void emmc_gpt_parse(link_t *gpt);
 void emmc_gpt_free(link_t *gpt);
