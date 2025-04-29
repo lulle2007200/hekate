@@ -2112,7 +2112,8 @@ static void _update_partition_bar()
 	// Set widths based on max bar width.
 	lv_coord_t w = lv_obj_get_width(h1);
 	
-	u32 total_size         = (part_info.total_sct - AU_ALIGN_SECTORS) / SECTORS_PER_GB;
+	// account for alignment + 1mb for backup gpt
+	u32 total_size         = (part_info.total_sct - AU_ALIGN_SECTORS - (1 << 11)) / SECTORS_PER_GB;
 
 	u32 bar_hos_size       = w * (part_info.hos_size    >> 10) / total_size;
 	u32 bar_emu_size       = w * (part_info.emu_size    >> 10) / total_size;
@@ -2180,7 +2181,8 @@ static lv_res_t _action_slider_hos(lv_obj_t *slider){
 	part_info.auto_assign_free_storage = size != 0;
 
 	if(size){
-		size = (part_info.total_sct >> 11) - 16 - part_info.and_size - part_info.emu_size - part_info.hos_os_size - part_info.l4t_size - part_info.emu_sd_size;
+		// account for alignment and 1mb for backup gpt
+		size = (part_info.total_sct >> 11) - 16 - 1 - part_info.and_size - part_info.emu_size - part_info.hos_os_size - part_info.l4t_size - part_info.emu_sd_size;
 	}
 
 	part_info.hos_size = size;
@@ -2211,13 +2213,13 @@ static lv_res_t _action_slider_hos_os(lv_obj_t *slider){
 	}
 
 	u32 hos_os_size = user_size ? (user_size + part_info.hos_sys_size_mb) : 0;
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size - part_info.emu_sd_size;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - 1 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size - part_info.emu_sd_size;
 
 	// Sanitize sizes based on new HOS OS size.
 	if(!part_info.auto_assign_free_storage){
 		u32 total = part_info.and_size + part_info.hos_size + part_info.emu_size + part_info.l4t_size + hos_os_size + part_info.emu_sd_size;
-		if(total > (part_info.total_sct >> 11) - 16){
-			hos_os_size = (part_info.total_sct >> 11) - 16 - part_info.l4t_size - part_info.and_size - part_info.emu_size - part_info.hos_size - part_info.emu_sd_size;
+		if(total > (part_info.total_sct >> 11) - 16 - 1){
+			hos_os_size = (part_info.total_sct >> 11) - 16 - 1 - part_info.l4t_size - part_info.and_size - part_info.emu_size - part_info.hos_size - part_info.emu_sd_size;
 			lv_slider_set_value(slider, (hos_os_size - part_info.hos_sys_size_mb) >> 10);
 		}
 	}else if (hos_size > part_info.hos_min_size_mb)
@@ -2227,8 +2229,8 @@ static lv_res_t _action_slider_hos_os(lv_obj_t *slider){
 	}
 	else
 	{
-		hos_os_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - part_info.hos_min_size_mb - part_info.emu_sd_size;
-		hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size - part_info.emu_sd_size;
+		hos_os_size = (part_info.total_sct >> 11) - 16 - 1 - part_info.emu_size - part_info.l4t_size - part_info.and_size - part_info.hos_min_size_mb - part_info.emu_sd_size;
+		hos_size = (part_info.total_sct >> 11) - 16 - 1 - part_info.emu_size - part_info.l4t_size - part_info.and_size - hos_os_size - part_info.emu_sd_size;
 		if (hos_size < part_info.hos_min_size_mb || hos_os_size < part_info.hos_sys_size_mb + 4096)
 		{
 			lv_slider_set_value(slider, (part_info.hos_os_size - part_info.hos_sys_size_mb) >> 10);
@@ -2263,7 +2265,7 @@ out:
 static lv_res_t _action_slider_emu(lv_obj_t *slider)
 {
 	#define EMUMMC_32GB_FULL 29856
-	#define EMUMMC_64GB_FULL (59664 + 1) // 1MB extra for backup GPT.
+	#define EMUMMC_64GB_FULL 59664
 
 	static const u32 rsvd_mb = 4 + 4 + 16 + 8; // BOOT0 + BOOT1 + 16MB offset + 8MB alignment.
 	u32 max_emmc_size = !part_info.emmc_is_64gb ? EMUMMC_32GB_FULL : EMUMMC_64GB_FULL;
@@ -2300,10 +2302,10 @@ static lv_res_t _action_slider_emu(lv_obj_t *slider)
 	}
 
 	// Sanitize sizes based on new HOS size.
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - size - part_info.emu_sd_size - part_info.l4t_size - part_info.and_size - part_info.hos_os_size;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - 1 - size - part_info.emu_sd_size - part_info.l4t_size - part_info.and_size - part_info.hos_os_size;
 	u32 total = part_info.l4t_size + part_info.and_size + part_info.hos_size + part_info.hos_os_size + part_info.emu_sd_size + size;
 
-	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16))
+	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16 - 1))
 	{
 		part_info.emu_size = size;
 		part_info.emu_double	 = emu_double;
@@ -2373,10 +2375,10 @@ static lv_res_t _action_slider_emu_sd(lv_obj_t *slider){
 	}
 
 	// Sanitize sizes based on new HOS size.
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - size - part_info.emu_size	- part_info.l4t_size - part_info.and_size - part_info.hos_os_size;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - 1 - size - part_info.emu_size	- part_info.l4t_size - part_info.and_size - part_info.hos_os_size;
 	u32 total = part_info.l4t_size + part_info.and_size + part_info.hos_size + part_info.hos_os_size + part_info.emu_size + size;
 
-	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16))
+	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16 - 1))
 	{
 		part_info.emu_sd_size = size;
 		part_info.emu_sd_double	 = emu_sd_double;
@@ -2424,13 +2426,13 @@ static lv_res_t _action_slider_l4t(lv_obj_t *slider)
 	else if (size < 8192)
 		size = 8192;
 
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - part_info.hos_os_size - part_info.emu_size - size - part_info.and_size - part_info.emu_sd_size;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - 1 - part_info.hos_os_size - part_info.emu_size - size - part_info.and_size - part_info.emu_sd_size;
 
 	// Sanitize sizes based on new HOS size.
 	if(!part_info.auto_assign_free_storage){
 		u32 total = part_info.and_size + part_info.hos_os_size + part_info.emu_size + part_info.hos_size + size + part_info.emu_sd_size;
-		if(total > (part_info.total_sct >> 11) - 16){
-			size = (part_info.total_sct >> 11) - 16 - part_info.hos_os_size - part_info.and_size - part_info.emu_size - part_info.hos_size - part_info.emu_sd_size;
+		if(total > (part_info.total_sct >> 11) - 16 - 1){
+			size = (part_info.total_sct >> 11) - 16 - 1 - part_info.hos_os_size - part_info.and_size - part_info.emu_size - part_info.hos_size - part_info.emu_sd_size;
 			lv_slider_set_value(slider, size >> 10);
 		}
 	}else if (hos_size > part_info.hos_min_size_mb)
@@ -2440,8 +2442,8 @@ static lv_res_t _action_slider_l4t(lv_obj_t *slider)
 	}
 	else
 	{
-		size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - part_info.emu_sd_size - 2048;
-		hos_size = (part_info.total_sct >> 11) - 16 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - size - part_info.emu_sd_size;
+		size = (part_info.total_sct >> 11) - 16 - 1 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - part_info.emu_sd_size - 2048;
+		hos_size = (part_info.total_sct >> 11) - 16 - 1 - part_info.emu_size - part_info.hos_os_size - part_info.and_size - size - part_info.emu_sd_size;
 		if (hos_size < part_info.hos_min_size_mb || size < 8192)
 		{
 			lv_slider_set_value(slider, part_info.l4t_size >> 10);
@@ -2506,10 +2508,10 @@ static lv_res_t _action_slider_and(lv_obj_t *slider)
 	};
 
 	// Sanitize sizes based on new HOS size.
-	s32 hos_size = (part_info.total_sct >> 11) - 16 - and_size - part_info.hos_os_size - part_info.emu_size- part_info.l4t_size - part_info.emu_sd_size ;
+	s32 hos_size = (part_info.total_sct >> 11) - 16 - 1 - and_size - part_info.hos_os_size - part_info.emu_size- part_info.l4t_size - part_info.emu_sd_size ;
 	u32 total = part_info.l4t_size + part_info.emu_sd_size + part_info.hos_size + part_info.hos_os_size + part_info.emu_size + and_size;
 
-	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16))
+	if ((part_info.auto_assign_free_storage && hos_size > part_info.hos_min_size_mb) || (!part_info.auto_assign_free_storage && total <= (part_info.total_sct >> 11) - 16 - 1))
 	{
 		part_info.and_size = and_size;
 		part_info.and_double = and_double;
@@ -3335,7 +3337,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 
 	// Set initial HOS partition size, so the correct cluster size can be selected.
 	if(drive == DRIVE_SD){
-		part_info.hos_size = (part_info.total_sct >> 11) - 16; // Important if there's no slider change.
+		part_info.hos_size = (part_info.total_sct >> 11) - 16 - 1; // Important if there's no slider change.
 	}else{
 		// On eMMC, default is to not have a FAT32 partition
 		part_info.hos_size = 0;
@@ -3377,7 +3379,8 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	}
 
 
-	u32 total_size         = (part_info.total_sct - AU_ALIGN_SECTORS) / SECTORS_PER_GB;
+	// account for alignment + 1mb for backup gpt
+	u32 total_size         = (part_info.total_sct - AU_ALIGN_SECTORS - (1 << 11)) / SECTORS_PER_GB;
 	u32 bar_emu_sd_size    = lv_obj_get_width(h1) * (part_info.emu_sd_size >> 10) / total_size;
 	u32 bar_hos_size       = lv_obj_get_width(h1) * (part_info.hos_size    >> 10) / total_size;
 	u32 bar_emu_size       = lv_obj_get_width(h1) * (part_info.emu_size    >> 10) / total_size;
