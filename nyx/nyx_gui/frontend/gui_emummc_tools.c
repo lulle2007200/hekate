@@ -81,8 +81,7 @@ static emummc_part_cfg_t emummc_part_cfg;
 
 static lv_res_t _action_emummc_window_close(lv_obj_t *btn)
 {
-	lv_win_close_action(btn);
-	close_btn = NULL;
+	nyx_win_close_action_custom(btn);
 
 	// Delete and relaunch main emuMMC window.
 	lv_obj_clean(emummc_parent_cont);
