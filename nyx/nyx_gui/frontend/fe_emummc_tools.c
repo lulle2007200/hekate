@@ -673,7 +673,7 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 		user_part.lba_start = user_offset;
 		user_part.lba_end = user_offset + user_sectors - 1;
 		strcpy(user_part.name, "USER");
-		nx_emmc_bis_init(&user_part, true, sd_sector_off);
+		nx_emmc_bis_init(&user_part, true, &sd_storage, sd_sector_off);
 
 		s_printf(gui->txt_buf, "Formatting USER... \n");
 		lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, gui->txt_buf);
@@ -787,7 +787,7 @@ static int _emummc_raw_derive_bis_keys(emmc_tool_gui_t *gui, u32 resized_count)
 	LIST_INIT(gpt);
 	emmc_gpt_parse(&gpt);
 	emmc_part_t *cal0_part = emmc_part_find(&gpt, "PRODINFO"); // check if null
-	nx_emmc_bis_init(cal0_part, false, 0);
+	nx_emmc_bis_init(cal0_part, false, NULL,  0);
 	nx_emmc_bis_read(0, 0x40, cal0_buff);
 	nx_emmc_bis_end();
 	emmc_gpt_free(&gpt);

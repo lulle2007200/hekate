@@ -229,7 +229,8 @@ typedef struct _nx_emmc_cal0_t
 
 int  nx_emmc_bis_read(u32 sector, u32 count, void *buff);
 int  nx_emmc_bis_write(u32 sector, u32 count, void *buff);
-void nx_emmc_bis_init(emmc_part_t *part, bool enable_cache, u32 emummc_offset);
+// when storage == NULL, use active emummc config, otherwise, access storage at offset
+void nx_emmc_bis_init(emmc_part_t *part, bool enable_cache, sdmmc_storage_t *storage, u32 emummc_offset);
 void nx_emmc_bis_end();
 
 #endif
