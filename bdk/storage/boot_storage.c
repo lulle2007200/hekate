@@ -10,6 +10,7 @@
 #define DEV_INVALID 0xff
 
 static FATFS boot_storage_fs;
+static BYTE drive_cur = -1;
 static BYTE drive = -1;
 
 static const char* drive_base_paths[] = {
@@ -27,20 +28,20 @@ static bool _is_eligible(){
 } 
 
 bool boot_storage_get_mounted(){
-	switch(drive){
+	switch(drive_cur){
 	case DRIVE_SD:
 		return sd_get_card_mounted();
 	case DRIVE_EMMC:
 		return emmc_get_mounted();
 	case DRIVE_BOOT1:
 	case DRIVE_BOOT1_1MB:
-		return drive != DEV_INVALID;
+		return drive_cur != DEV_INVALID;
 	}
 	return false;
 }
 
 bool boot_storage_get_initialized(){
-	switch(drive){
+	switch(drive_cur){
 	case DRIVE_BOOT1:
 	case DRIVE_EMMC:
 	case DRIVE_BOOT1_1MB:
@@ -52,7 +53,7 @@ bool boot_storage_get_initialized(){
 }
 
 static bool _boot_storage_initialize(){
-	switch(drive){
+	switch(drive_cur){
 	case DRIVE_BOOT1:
 	case DRIVE_EMMC:
 	case DRIVE_BOOT1_1MB:
@@ -66,7 +67,7 @@ static bool _boot_storage_initialize(){
 
 static void _boot_storage_end(bool deinit){
 	if(boot_storage_get_mounted()){
-		switch(drive){
+		switch(drive_cur){
 		case DRIVE_SD:
 			sd_unmount();
 			break;
@@ -75,13 +76,13 @@ static void _boot_storage_end(bool deinit){
 			break;
 		case DRIVE_BOOT1:
 		case DRIVE_BOOT1_1MB:
-			f_mount(NULL, drive_base_paths[drive], 0);
+			f_mount(NULL, drive_base_paths[drive_cur], 0);
 		}
-		drive = DEV_INVALID;
+		drive_cur = DEV_INVALID;
 	}
 
 	if(deinit){
-		switch(drive){
+		switch(drive_cur){
 		case DRIVE_SD:
 			sd_end();
 			break;
@@ -124,7 +125,8 @@ static bool _boot_storage_mount(){
 			res = f_chdrive(drive_base_paths[i]);
 			if(res == FR_OK && _is_eligible()){
 				gfx_printf("%s ok\n", drive_base_paths[emmc_drives[i]]);
-				drive = emmc_drives[i];
+				drive_cur = emmc_drives[i];
+				drive = drive_cur;
 				break;
 			}else{
 				gfx_printf("%s fail\n", drive_base_paths[emmc_drives[i]]);
@@ -155,7 +157,8 @@ emmc_init_fail:
 	res = f_chdrive(drive_base_paths[DRIVE_EMMC]);
 
 	if(res == FR_OK && _is_eligible()){
-		drive = DRIVE_EMMC;
+		drive_cur = DRIVE_EMMC;
+		drive = drive_cur;
 		return true;
 	}
 
@@ -172,7 +175,8 @@ emmc_init_fail2:
 	res = f_chdrive(drive_base_paths[DRIVE_SD]);
 
 	if(res == FR_OK && _is_eligible()){
-		drive = DRIVE_SD;
+		drive_cur = DRIVE_SD;
+		drive = drive_cur;
 		return true;
 	}
 
@@ -194,7 +198,7 @@ bool boot_storage_mount(){
 	}
 
 	if(res){
-		res = f_chdrive(drive_base_paths[drive]) == FR_OK;
+		res = f_chdrive(drive_base_paths[drive_cur]) == FR_OK;
 	}
 
 	return res;

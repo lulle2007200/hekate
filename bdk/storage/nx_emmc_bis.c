@@ -327,3 +327,11 @@ void nx_emmc_bis_end()
 	emu_storage = NULL;
 	emu_offset = 0;
 }
+
+sdmmc_storage_t *nx_emmc_bis_get_storage(){
+	if(emu_storage == &emmc_storage){
+		return &emmc_storage;
+	}else{
+		return emmc_part_get_storage();
+	}
+}

@@ -241,6 +241,7 @@ static void _create_mbox_emummc_raw()
 			mbr_ctx.sector[i - 1] = part_start;
 
 			// Only allow up to 16GB resized emuMMC.
+			// TODO: why?
 			if (part_size <= 0x2010000)
 				mbr_ctx.resized_cnt[i - 1] = part_size - 0xC000; // Save sectors count without protective size and BOOT0/1.
 			else if (part_size >= emmc_size_safe)

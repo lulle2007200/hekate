@@ -42,6 +42,7 @@
 #include <utils/btn.h>
 #include <utils/sprintf.h>
 #include <utils/types.h>
+#include "../hos/hos.h"
 #include "../storage/sfd.h"
 
 #define AU_ALIGN_SECTORS 0x8000 // 16MB.
@@ -212,7 +213,7 @@ static int _stat_and_copy_files(const char *src, const char *dst, char *path, u3
 	u32 dirLength = 0;
 	static FILINFO fno;
 
-	f_chdrive(src);
+	DBG_PRINT_ARGS("chdrive %d", f_chdrive(src));
 
 	// Open directory.
 	res = f_opendir(&dir, path);
@@ -273,9 +274,9 @@ static int _stat_and_copy_files(const char *src, const char *dst, char *path, u3
 
 				// Open file for writing.
 				f_chdrive(dst);
-				f_open(&fp_dst, path, FA_CREATE_ALWAYS | FA_WRITE);
-				f_lseek(&fp_dst, fno.fsize);
-				f_lseek(&fp_dst, 0);
+				DBG_PRINT_ARGS("open %d", f_open(&fp_dst, path, FA_CREATE_ALWAYS | FA_WRITE));
+				DBG_PRINT_ARGS("seek1 %d", f_lseek(&fp_dst, fno.fsize));
+				DBG_PRINT_ARGS("seek2 %d", f_lseek(&fp_dst, 0));
 
 				// Open file for reading.
 				f_chdrive(src);
@@ -286,12 +287,16 @@ static int _stat_and_copy_files(const char *src, const char *dst, char *path, u3
 					u32 chunk_size = MIN(file_bytes_left, SZ_4M); // 4MB chunks.
 					file_bytes_left -= chunk_size;
 
+					u32 res1;
 					// Copy file to buffer.
-					f_read(&fp_src, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
+					res1 = f_read(&fp_src, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
+					DBG_PRINT_ARGS("res read: %d", res1);
 					manual_system_maintenance(true);
 
 					// Write file to disk.
-					f_write(&fp_dst, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
+					res1 = f_write(&fp_dst, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
+					DBG_PRINT_ARGS("res write: %d", res1);
+
 				}
 
 				// Finalize copied file.
@@ -395,8 +400,6 @@ static s32 _get_gpt_part_by_name(gpt_t *gpt, const char* name, s32 prev){
 
 static void _prepare_and_flash_mbr_gpt()
 {
-	sd_initialize(false);
-	emmc_initialize(false);
 	sdmmc_storage_t *storage = part_info.drive == DRIVE_SD ? &sd_storage : &emmc_storage;
 
 	mbr_t mbr;
@@ -407,6 +410,7 @@ static void _prepare_and_flash_mbr_gpt()
 	s32 l4t_idx    = -1;
 	s32 emu_idx[2] = {-1, -1};
 	s32 hos_idx    = -1;
+	s32 emu_sd_idx[2] = {-1, -1};
 
 	// Create new GPT
 	gpt_t *gpt = zalloc(sizeof(*gpt));
@@ -454,13 +458,6 @@ static void _prepare_and_flash_mbr_gpt()
 	static const u8 emu_part_guid[]          = { 0x00, 0x7E, 0xCA, 0x11,  0x00, 0x00,  0x00, 0x00,  0x00, 0x00,  'e', 'm', 'u', 'M', 'M', 'C' };
 	// static const u8 emu_sd_part_guid[]       = { 0x00, 0x7E, 0xCA, 0x11,  0x00, 0x00,  0x00, 0x00,  0x00, 0x00,  0x00, 'e', 'm', 'u', 'S', 'D'};
 	static const u8 emu_sd_mbr_part_guid[]   = { 0x00, 0x7E, 0xCA, 0x11,  0x00, 0x00,  0x00, 0x00, 'e', 'm', 'u', 'S', 'D', 'M', 'B', 'R'};
-
-	if(part_info.hos_size){
-		hos_idx = gpt_idx;
-		_create_gpt_partition(gpt, &gpt_idx, &gpt_next_lba, part_info.hos_size << 11, true, "hos_data", basic_part_guid, NULL, true);
-		// Clear non-standard Windows MBR attributes. bit4: Read only, bit5: Shadow copy, bit6: Hidden, bit7: No drive letter.
-		gpt->entries[gpt_idx - 1].part_guid[7] = 0;
-	}
 
 	if(part_info.l4t_size){
 		l4t_idx = gpt_idx;
@@ -571,6 +568,13 @@ static void _prepare_and_flash_mbr_gpt()
 		}
 	}
 
+	if(part_info.hos_size){
+		hos_idx = gpt_idx;
+		_create_gpt_partition(gpt, &gpt_idx, &gpt_next_lba, part_info.hos_size << 11, true, "hos_data", basic_part_guid, NULL, true);
+		// Clear non-standard Windows MBR attributes. bit4: Read only, bit5: Shadow copy, bit6: Hidden, bit7: No drive letter.
+		gpt->entries[gpt_idx - 1].part_guid[7] = 0;
+	}
+
 	if(part_info.emu_sd_size){
 		u32 emu_sd_size;
 		if(part_info.emu_sd_double){
@@ -581,17 +585,18 @@ static void _prepare_and_flash_mbr_gpt()
 
 		char part_name[36];
 		for(u32 i = 1; i <= (part_info.emu_sd_double ? 2 : 1); i++){
-			// TODO: Switch doesnt like this
-			//       Either, single sector partition not ok
-			//       Or non aligned partition not ok (emusd partition is not 16mb aligned anymre due to mbr partition of size 1)
 			// split up emu sd partition into two
 			// one partition that only covers the mbr
 			// one partition that corresponds the actual fat32 partition
 			// this way it can be accessed normally
+			// mbr partition must be >=1mb, otherwise hos panics
 			_make_part_name(part_name, "emusd_mbr", i);
-			_create_gpt_partition(gpt, &gpt_idx, &gpt_next_lba, 1, true, part_name, emu_sd_mbr_part_guid, NULL, false);
+			_create_gpt_partition(gpt, &gpt_idx, &gpt_next_lba, 1 << 11, true, part_name, emu_sd_mbr_part_guid, NULL, true);
+
+			emu_sd_idx[i - 1] = gpt_idx;
+
 			_make_part_name(part_name, "emusd", i);
-			_create_gpt_partition(gpt, &gpt_idx, &gpt_next_lba, (emu_sd_size << 11) - 1, false, part_name, basic_part_guid, NULL, true);
+			_create_gpt_partition(gpt, &gpt_idx, &gpt_next_lba, (emu_sd_size - 1) << 11, false, part_name, basic_part_guid, NULL, true);
 			// clear windows hidden attributes
 			gpt->entries[gpt_idx - 1].part_guid[7] = 0;
 		}
@@ -604,9 +609,9 @@ static void _prepare_and_flash_mbr_gpt()
 
 	gpt_header_t gpt_backup_header = {0};
 	memcpy(&gpt_backup_header, &gpt->header, sizeof(gpt_backup_header));
-	gpt_backup_header.my_lba = sd_storage.sec_cnt - 1;
+	gpt_backup_header.my_lba = storage->sec_cnt - 1;
 	gpt_backup_header.alt_lba = 1;
-	gpt_backup_header.part_ent_lba = sd_storage.sec_cnt - 33;
+	gpt_backup_header.part_ent_lba = storage->sec_cnt - 33;
 	gpt_backup_header.crc32 = 0; // Set to 0 for calculation.
 	gpt_backup_header.crc32 = crc32_calc(0, (const u8 *)&gpt_backup_header, gpt_backup_header.size);
 
@@ -654,17 +659,41 @@ static void _prepare_and_flash_mbr_gpt()
 
 	}else{
 		// For eMMC, only gpt protective partition spanning entire disk
+		// and emusd/fat32 partition
 		memset(&mbr, 0, sizeof(mbr));
-		mbr.partitions[0].start_sct_chs.sector = 0x02;
-		mbr.partitions[0].end_sct_chs.sector   = 0xff;
-		mbr.partitions[0].end_sct_chs.cylinder = 0xff;
-		mbr.partitions[0].end_sct_chs.head     = 0xff;
-		mbr.partitions[0].type                 = 0xee;
-		mbr.partitions[0].start_sct            = 0x1;
-		mbr.partitions[0].size_sct             = 0xffffffff;
-		mbr.boot_signature = 0xaa55;
-	}
 
+		if(hos_idx != -1 || emu_sd_idx[0] != -1){
+			se_gen_prng128(random_number);
+			memcpy(&mbr.signature, random_number, 4);
+		}
+
+		u32 mbr_idx = 0;
+
+		if(hos_idx != -1){
+			mbr.partitions[mbr_idx].start_sct = gpt->entries[hos_idx].lba_start;
+			mbr.partitions[mbr_idx].size_sct = gpt->entries[hos_idx].lba_end - gpt->entries[hos_idx].lba_start + 1;
+			mbr.partitions[mbr_idx].type = 0x0c;
+			mbr_idx++;
+		}
+
+		for(u32 i = 0; i < 2; i++){
+			if(emu_sd_idx[i] != -1){
+				mbr.partitions[mbr_idx].start_sct = gpt->entries[emu_sd_idx[i]].lba_start;
+				mbr.partitions[mbr_idx].size_sct = gpt->entries[emu_sd_idx[i]].lba_end - gpt->entries[emu_sd_idx[i]].lba_start + 1;
+				mbr.partitions[mbr_idx].type = 0x0c;
+				mbr_idx++;
+			}
+		}
+
+		mbr.partitions[mbr_idx].type                 = 0xee;
+		mbr.partitions[mbr_idx].start_sct            = 0x1;
+		mbr.partitions[mbr_idx].start_sct_chs.sector = 0x02;
+		mbr.boot_signature = 0xaa55;
+		mbr.partitions[mbr_idx].size_sct             = 0xffffffff;
+		mbr.partitions[mbr_idx].end_sct_chs.sector   = 0xff;
+		mbr.partitions[mbr_idx].end_sct_chs.cylinder = 0xff;
+		mbr.partitions[mbr_idx].end_sct_chs.head     = 0xff;
+	}
 
 	if(!part_info.hos_os_size){
 		// only clear first 16mb if not keeping hos
@@ -1586,6 +1615,7 @@ static int _backup_and_restore_files(bool backup, const char *drive, lv_obj_t **
 	}
 
 	// Copy all or hekate/Nyx files.
+	DBG_PRINT("start stat");
 	res = _stat_and_copy_files(src_drv, dst_drv, path, &total_files, &total_size, labels);
 
 	// If incomplete backup mode, copy MWS and payload.bin also.
@@ -1625,6 +1655,45 @@ static DWORD _format_fat_partition(const char* path, u8 flags){
 	free(buf);
 
 	return mkfs_error;
+}
+
+static bool _derive_bis_keys(gpt_t *gpt)
+{
+	bool res = true;
+
+	// Read and decrypt CAL0 for validation of working BIS keys.
+	s32 gpt_idx = _get_gpt_part_by_name(gpt, "PRODINFO", -1);
+	if(gpt_idx == -1){
+		return false;
+	}
+
+	emmc_part_t cal0_part = {0};
+	cal0_part.lba_start   = gpt->entries[gpt_idx].lba_start;
+	cal0_part.lba_end     = gpt->entries[gpt_idx].lba_end;
+	strcpy(cal0_part.name, "PRODINFO");
+
+	// Generate BIS keys.
+	hos_bis_keygen();
+
+	u8 *cal0_buff = malloc(SZ_64K);
+
+	nx_emmc_bis_init(&cal0_part, false, part_info.drive == DRIVE_SD ? &sd_storage : &emmc_storage, 0);
+	nx_emmc_bis_read(0, 0x40, cal0_buff);
+	nx_emmc_bis_end();
+
+	nx_emmc_cal0_t *cal0 = (nx_emmc_cal0_t *)cal0_buff;
+
+	// Check keys validity.
+	if (memcmp(&cal0->magic, "CAL0", 4))
+	{
+		// Clear EKS keys.
+		hos_eks_clear(HOS_KB_VERSION_MAX);
+		res = false;
+	}
+
+	free(cal0_buff);
+
+	return res;
 }
 
 static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
@@ -1752,6 +1821,8 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 		}
 	}
 
+	DBG_PRINT("backup done");
+
 	if(part_info.drive == DRIVE_SD){
 		sd_unmount();
 	}else{
@@ -1776,10 +1847,13 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 		sdmmc_storage_read(storage, 1, sizeof(*new_gpt) / 0x200, new_gpt);
 	}
 
+
+	// Restore backed up files if we made a fat32 partition
 	if(part_info.hos_size){
 		u32 hos_start = 0;
 		u32 hos_size = 0;
 		if(!has_gpt){
+			// FAT32 partition is first in mbr if we don't have gpt
 			hos_size = new_mbr.partitions[0].size_sct;
 			hos_start = new_mbr.partitions[0].start_sct;
 		}else{
@@ -1796,17 +1870,17 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 
 		sfd_init(storage, hos_start, hos_size);
 		u32 mkfs_error = _format_fat_partition("sfd:", FM_FAT32 | FM_SFD);
-		
+	
+		DBG_PRINT("format done");	
+
 		u8 *buf = malloc(0x200);
 
 		if(mkfs_error != FR_OK){
 			// Error
 			s_printf((char*)buf, "#FFDD00 Error:# Failed to format disk (%d)!\n\n", mkfs_error);
-			if(part_info.drive == DRIVE_EMMC || part_info.skip_backup){
-				// on eMMC not much we can do
-				strcat((char*)buf, "Press #FF8000 POWER# to continue!");
-			}else{
-				strcat((char*)buf, "Remove the SD card and check that it is OK.\nIf not, format it, reinsert it and\npress #FF8000 POWER# to continue!");
+			if(part_info.drive == DRIVE_SD && !part_info.skip_backup){
+				// When SD and not skipping backup, ask to manually format sd and try to restore backed up files
+				strcat((char*)buf, "\n\nRemove the SD card and check that it is OK.\nIf not, format it, reinsert it and\npress #FF8000 POWER# to continue!");
 			}
 
 			lv_label_set_text(lbl_status, (char *)buf);
@@ -1821,6 +1895,12 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 				lv_label_set_text(lbl_status, "#00DDFF Status:# Restoring files...");
 				manual_system_maintenance(true);
 
+				if(boot_storage_get_drive() != DRIVE_SD){
+					FIL f;
+					f_open(&f, part_info.drive == DRIVE_SD ? "sd:.no_boot_storage" : "emmc:.no_boot_storage", FA_WRITE | FA_CREATE_ALWAYS);
+					f_close(&f);
+				}
+
 				// Try twice to restore files
 				if (_backup_and_restore_files(false, "sd:", lbl_paths) == FR_OK || 
 				    _backup_and_restore_files(false, "sd:", lbl_paths) == FR_OK){
@@ -1829,9 +1909,6 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 					lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to restore files!");
 				}
 				manual_system_maintenance(true);
-			}else{
-				// On eMMC/when skipping backup, nothing we can do
-				while((!btn_wait()) & BTN_POWER){}
 			}
 			f_mount(NULL, "ram:", 0);
 			sfd_end();
@@ -1843,13 +1920,23 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 			if(part_info.drive == DRIVE_SD){
 				sd_mount();
 			}else{
-				emmc_mount();
+				DBG_PRINT_ARGS("emmc mount %d", emmc_mount());
 			}
+
 			f_setlabel(part_info.drive == DRIVE_SD ? "sd:SWITCH SD" : "emmc:SWITCH EMMC");
+
+			if(boot_storage_get_drive() != part_info.drive){
+				// if we havent booted from the drive currently being formatted, create .no_boot_storage
+				FIL f;
+				f_open(&f, part_info.drive == DRIVE_SD ? "sd:.no_boot_storage" : "emmc:.no_boot_storage", FA_WRITE | FA_CREATE_ALWAYS);
+				f_close(&f);
+			}
+
 			if(!part_info.skip_backup){
 				lv_label_set_text(lbl_status, "#00DDFF Status:# Restoring files...");
 				manual_system_maintenance(true);
 				// Try twice to restroe files
+				DBG_PRINT("start restore");	
 				if (_backup_and_restore_files(false, part_info.drive == DRIVE_SD ? "sd:" : "emmc:", lbl_paths) != FR_OK &&
 				    _backup_and_restore_files(false, part_info.drive == DRIVE_SD ? "sd:" : "emmc:", lbl_paths) != FR_OK)
 				{
@@ -1862,17 +1949,24 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 					goto error;
 				}
 			}
+
 			f_mount(NULL, "ram:", 0);
 			free(buf);
 		}
 		sfd_end();
 	}
 
+	// Format emuSD partition(s)
 	if(has_gpt){
 		s32 gpt_idx = _get_gpt_part_by_name(new_gpt, "emusd_mbr", -1);
 		while(gpt_idx != -1){
+			u32 emu_sd_mbr_start = new_gpt->entries[gpt_idx].lba_start;
+
+			gpt_idx++;
+
 			u32 emu_sd_start = new_gpt->entries[gpt_idx].lba_start;
-			u32 emu_sd_size = new_gpt->entries[gpt_idx + 1].lba_end - emu_sd_start + 1;
+			u32 emu_sd_size  = new_gpt->entries[gpt_idx].lba_end - emu_sd_start + 1;
+			u16 *name = new_gpt->entries[gpt_idx].name;
 
 			FIL f;
 			u32 res;
@@ -1880,19 +1974,39 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 			lv_label_set_text(lbl_status, "#00DDFF Status:# Formatting emuSD partition...");
 			manual_system_maintenance(true);
 
+			// write mbr
+
+			mbr_t mbr = {0};
+			u8 random_number[16];
+			mbr.partitions[0].start_sct = emu_sd_start - emu_sd_mbr_start;
+			mbr.partitions[0].size_sct  = emu_sd_size;
+			mbr.boot_signature = 0xaa55;
+			se_gen_prng128(random_number);
+			memcpy(&mbr.signature, random_number, 4);
+
+			sdmmc_storage_write(storage, emu_sd_mbr_start, 1, &mbr);
+
 			sfd_init(storage, emu_sd_start, emu_sd_size);
 
 			DBG_PRINT("emusd format start");
 			DBG_PRINT_ARGS("%d %d", emu_sd_start, emu_sd_size);
-			res = _format_fat_partition("sfd:", FM_FAT32);
+			res = _format_fat_partition("sfd:", FM_FAT32 | FM_SFD);
 			if(res == FR_OK){
 				DBG_PRINT("format done success");
 				FATFS fs;
 				res = f_mount(&fs, "sfd:", 1);
 				if(res == FR_OK){
 					DBG_PRINT("mount success");
-					res = f_open(&f, "sfd:.no_boot_storage", FA_CREATE_ALWAYS | FA_WRITE);
-					f_close(&f);
+					// Create .no_boot_storage on emuSD partition so it is never used as boot storage
+					// set label
+					char label[0x30];
+					strcpy(label, "sfd:");
+					_wctombs(name, label + strlen(label), 36);
+					res = f_setlabel(label);
+					if(res == FR_OK){
+						res = f_open(&f, "sfd:.no_boot_storage", FA_CREATE_ALWAYS | FA_WRITE);
+						f_close(&f);
+					}
 				}
 				f_mount(NULL, "sfd:", 0);
 			}
@@ -1907,34 +2021,50 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 
 			sfd_end();
 
-			gpt_idx++;
 			gpt_idx = _get_gpt_part_by_name(new_gpt, "emusd_mbr", gpt_idx);
 		}
 	}
 
+	// Format HOS USER if size changed
 	if(has_gpt){
 		s32 gpt_idx = _get_gpt_part_by_name(new_gpt, "USER", -1);
 		if(gpt_idx != -1){
-			DBG_PRINT("yes resize");
 			// resize user if necessary
 			gpt_entry_t *entry = &new_gpt->entries[gpt_idx];
-			u32 user_start = entry->lba_start;
-			u32 user_size = entry->lba_end - new_gpt->entries[gpt_idx].lba_start + 1;
+			u32 user_size      = entry->lba_end - new_gpt->entries[gpt_idx].lba_start + 1;
 
-			if(user_size != part_info.hos_os_og_size - part_info.hos_sys_size_mb - part_info.hos_os_align){
+			if(user_size != (part_info.hos_os_og_size - part_info.hos_sys_size_mb) << 11){
+				lv_label_set_text(lbl_status, "#00DDFF Status:# Resizing HOS USER partition...");
+				manual_system_maintenance(true);
+
 				// size changed
 				emmc_part_t user_part = { 0 };
-				user_part.lba_end = entry->lba_end;
-				user_part.lba_start = entry->lba_start;
+				user_part.lba_end     = entry->lba_end;
+				user_part.lba_start   = entry->lba_start;
 				strcpy(user_part.name, "USER");
 
 				user_size = ALIGN(user_size, 0x20);
-				// disk_set_info(DRIVE_EMU, SET_SECTOR_COUNT, &user_size);
+				disk_set_info(DRIVE_EMU, SET_SECTOR_COUNT, &user_size);
 
-				// nx_emmc_bis_init(&user_part, true, 0);
-				// nx_emmc_bis_end();
+				if(!_derive_bis_keys(new_gpt)){
+					lv_label_set_text(lbl_status, "#FFDD00 Error:# BIS key generation failed!");
+					manual_system_maintenance(true);
+					goto error;
+				}
 
-				// TODO: need bis storage support for regular emmc (no emummc)
+				nx_emmc_bis_init(&user_part, true, storage, 0);
+
+				u8 *buf = malloc(SZ_4M);
+				u32 mkfs_res = f_mkfs("emu:", FM_FAT32 | FM_SFD | FM_PRF2, 16384, buf, SZ_4M);
+
+				nx_emmc_bis_end();
+				hos_bis_keys_clear();
+
+				if(mkfs_res != FR_OK){
+					lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to format HOS USER partition!");
+					manual_system_maintenance(true);
+					goto error;
+				}
 			}
 		}
 	}
@@ -1979,6 +2109,8 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 
 
 error:
+	DBG_PRINT("Done format");
+
 	lv_obj_del(lbl_paths[0]);
 	lv_obj_del(lbl_paths[1]);
 
@@ -2712,8 +2844,47 @@ static void _create_mbox_check_files_total_size(u8 drive)
 	u32 total_size = 0;
 	path[0] = 0;
 
-	// Check total size of files.
-	int res = _stat_and_copy_files(drive == DRIVE_SD ? "sd:" : "emmc:", NULL, path, &total_files, &total_size, NULL);
+	mbr_t *mbr = zalloc(sizeof(*mbr));
+	gpt_t *gpt = NULL;
+	bool has_gpt = false;
+	bool has_hos_data = false;
+
+	sdmmc_storage_t *storage = drive == DRIVE_SD ? &sd_storage : &emmc_storage;
+	total_size = storage->sec_cnt;
+
+	// Read current MBR.
+	sdmmc_storage_read(storage, 0, 1, mbr);
+
+	// check if we have gpt
+	has_gpt = _has_gpt(mbr);
+
+	if(has_gpt){
+		// Calculate GPT part size.
+		gpt = zalloc(sizeof(*gpt));
+		sdmmc_storage_read(storage, 1, sizeof(*gpt) >> 9, gpt);
+	}
+
+	if(has_gpt){
+		if(_get_gpt_part_by_name(gpt, "hos_data", -1) != -1){
+			gfx_printf("yes hos data\n");
+			has_hos_data = true;
+		}
+	}
+
+	int res;
+	if(part_info.drive == DRIVE_EMMC && !has_hos_data){
+			gfx_printf("emmc !hos data\n");
+		// if we are on emmc, and dont have a partition named hos_data, dont even check files
+		// we might find an emusd fat32 partition instead
+		part_info.skip_backup = true;
+		res = FR_NO_FILESYSTEM;
+	}else{
+		// Check total size of files.
+		res = _stat_and_copy_files(drive == DRIVE_SD ? "sd:" : "emmc:", NULL, path, &total_files, &total_size, NULL);
+	}
+
+	gfx_printf("stat res %d\n", res);
+
 
 	if(res == FR_NO_FILESYSTEM){
 		// no fat system on selected storage, nothing to backup
@@ -2737,7 +2908,7 @@ static void _create_mbox_check_files_total_size(u8 drive)
 	}
 	else
 	{
-		if(res){
+		if(res == FR_NO_FILESYSTEM){
 			s_printf(txt_buf,
 				"#96FF00 No %s files to be backed up!#\n"
 				"#FFDD00 Any other partitions %swill be wiped!#\n", 
@@ -2767,18 +2938,7 @@ static void _create_mbox_check_files_total_size(u8 drive)
 	u32 bar_hos_os_size    = 0;
 	u32 bar_remaining_size = 0;
 	u32 bar_emu_sd_size    = 0;
-	mbr_t *mbr = zalloc(sizeof(*mbr));
-	gpt_t *gpt = NULL;
-	bool has_gpt = false;
-
-	sdmmc_storage_t *storage = drive == DRIVE_SD ? &sd_storage : &emmc_storage;
-	total_size = storage->sec_cnt;
-
-	// Read current MBR.
-	sdmmc_storage_read(storage, 0, 1, mbr);
-
-	// check if we have gpt
-	has_gpt = _has_gpt(mbr);
+	
 
 	lv_obj_t *lbl_part = lv_label_create(h1, NULL);
 	lv_label_set_recolor(lbl_part, true);
@@ -2796,11 +2956,6 @@ static void _create_mbox_check_files_total_size(u8 drive)
 			if (mbr->partitions[i].type == 0x83)
 				bar_l4t_size += mbr->partitions[i].size_sct;
 	}else{
-		// Calculate GPT part size.
-		gpt = zalloc(sizeof(*gpt));
-
-		sdmmc_storage_read(storage, 1, sizeof(*gpt) >> 9, gpt);
-
 		u32 i = 0;
 		if(!memcmp(gpt->entries[10].name, (char[]){'U', 0, 'S', 0, 'E', 0, 'R', 0}, 8)){
 			bar_hos_os_size += gpt->entries[10].lba_end - gpt->entries[0].lba_start + 1;
@@ -3365,10 +3520,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	if(drive == DRIVE_SD){
 		res = sd_mount() || sd_initialize(false);
 	}else{
-		if(boot_storage_get_drive() == DRIVE_EMMC){
-			boot_storage_unmount();
-		}
-		res = emmc_initialize(false);
+		res = emmc_mount() || emmc_initialize(false);
 	}
 
 	if (!res)

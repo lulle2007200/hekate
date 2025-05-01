@@ -55,5 +55,6 @@ int  emummc_storage_end();
 int  emummc_storage_read(u32 sector, u32 num_sectors, void *buf);
 int  emummc_storage_write(u32 sector, u32 num_sectors, void *buf);
 int  emummc_storage_set_mmc_partition(u32 partition);
+sdmmc_storage_t *emummc_get_storage();
 
 #endif

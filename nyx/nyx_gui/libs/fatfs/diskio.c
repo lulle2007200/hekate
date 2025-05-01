@@ -23,6 +23,72 @@ static u32 ramdisk_sectors = 0;
 static u32 emummc_sectors = 0;
 static u32 sfd_sectors = 0;
 
+static u32 cur_partition;
+
+static void save_cur_partition(BYTE pdrv){
+	bool save = false;
+	switch(pdrv){
+	case DRIVE_BOOT1:
+	case DRIVE_BOOT1_1MB:
+	case DRIVE_EMMC:
+		save = true;
+		break;
+	case DRIVE_SD:
+	case DRIVE_RAM:
+		break;
+	case DRIVE_BIS:
+	case DRIVE_EMU:
+		if(nx_emmc_bis_get_storage() == &emmc_storage){
+			save = true;
+		}
+		break;
+	case DRIVE_SFD:
+		if(sfd_get_storage() == &emmc_storage){
+			save = true;
+		}
+		break;
+	default:
+		break;
+	}
+
+	if(save){
+		cur_partition = emmc_storage.partition;
+	}
+}
+
+static void restore_cur_partition(BYTE pdrv){
+	bool restore = false;
+	switch(pdrv){
+	case DRIVE_BOOT1:
+	case DRIVE_BOOT1_1MB:
+	case DRIVE_EMMC:
+		restore = true;
+		break;
+	case DRIVE_SD:
+	case DRIVE_RAM:
+		break;
+	case DRIVE_BIS:
+	case DRIVE_EMU:
+		if(nx_emmc_bis_get_storage() == &emmc_storage){
+			restore = true;
+		}
+		break;
+	case DRIVE_SFD:
+		if(sfd_get_storage() == &emmc_storage){
+			restore = true;
+		}
+		break;
+	default:
+		break;
+	}
+
+	if(restore){
+		if(emmc_storage.partition != cur_partition){
+			emmc_set_partition(cur_partition);
+		}
+	}
+}
+
 static bool ensure_partition(BYTE pdrv){
 	u8 part;
 	switch(pdrv){
@@ -35,6 +101,7 @@ static bool ensure_partition(BYTE pdrv){
 		break;
 	case DRIVE_SD:
 	case DRIVE_RAM:
+		return true;
 	case DRIVE_BIS:
 	case DRIVE_EMU:
 	case DRIVE_SFD:
@@ -80,30 +147,45 @@ DRESULT disk_read (
 	UINT count		/* Number of sectors to read */
 )
 {
+	DRESULT res = RES_OK;
+
+	save_cur_partition(pdrv);
+
 	if(!ensure_partition(pdrv)){
-		return RES_ERROR;
+		res =  RES_ERROR;
 	}
 
-	switch (pdrv)
-	{
-	case DRIVE_SD:
-		return sdmmc_storage_read(&sd_storage, sector, count, (void *)buff) ? RES_OK : RES_ERROR;
-	case DRIVE_RAM:
-		return ram_disk_read(sector, count, (void *)buff);
-	case DRIVE_EMMC:
-		return sdmmc_storage_read(&emmc_storage, sector, count, (void *)buff) ? RES_OK : RES_ERROR;
-	case DRIVE_BIS:
-	case DRIVE_EMU:
-		return nx_emmc_bis_read(sector, count, (void *)buff) ? RES_OK : RES_ERROR;
-	case DRIVE_BOOT1_1MB:
-		return sdmmc_storage_read(&emmc_storage, sector + (0x100000 / 512), count, buff) ? RES_OK : RES_ERROR;
-	case DRIVE_BOOT1:
-		return sdmmc_storage_read(&emmc_storage, sector, count, buff) ? RES_OK : RES_ERROR;
-	case DRIVE_SFD:
-		return sfd_read(sector, count, buff) ? RES_OK : RES_ERROR;
+	if(res == RES_OK){
+		switch (pdrv)
+		{
+		case DRIVE_SD:
+			res = sdmmc_storage_read(&sd_storage, sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_RAM:
+			res = ram_disk_read(sector, count, (void *)buff);
+			break;
+		case DRIVE_EMMC:
+			res = sdmmc_storage_read(&emmc_storage, sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_BIS:
+		case DRIVE_EMU:
+			res = nx_emmc_bis_read(sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_BOOT1_1MB:
+			res = sdmmc_storage_read(&emmc_storage, sector + (0x100000 / 512), count, buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_BOOT1:
+			res = sdmmc_storage_read(&emmc_storage, sector, count, buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_SFD:
+			res = sfd_read(sector, count, buff) ? RES_OK : RES_ERROR;
+			break;
+		}
 	}
 
-	return RES_ERROR;
+	restore_cur_partition(pdrv);
+
+	return res;
 }
 
 /*-----------------------------------------------------------------------*/
@@ -116,30 +198,47 @@ DRESULT disk_write (
 	UINT count			/* Number of sectors to write */
 )
 {
+	DRESULT res = RES_OK;
+
+	save_cur_partition(pdrv);
+
 	if(!ensure_partition(pdrv)){
-		return RES_ERROR;
+		res = RES_ERROR;
 	}
 
-	switch (pdrv)
-	{
-	case DRIVE_SD:
-		return sdmmc_storage_write(&sd_storage, sector, count, (void *)buff) ? RES_OK : RES_ERROR;
-	case DRIVE_RAM:
-		return ram_disk_write(sector, count, (void *)buff);
-	case DRIVE_EMMC:
-	case DRIVE_BIS:
-		return RES_WRPRT;
-	case DRIVE_EMU:
-		return nx_emmc_bis_write(sector, count, (void *)buff) ? RES_OK : RES_ERROR;
-	case DRIVE_BOOT1_1MB:
-		return sdmmc_storage_write(&emmc_storage, sector + (0x100000 / 512), count, (void*)buff) ? RES_OK : RES_ERROR;
-	case DRIVE_BOOT1:
-		return sdmmc_storage_write(&emmc_storage, sector, count, (void*)buff) ? RES_OK : RES_ERROR;
-	case DRIVE_SFD:
-		return sfd_write(sector, count, (void*)buff) ? RES_OK : RES_ERROR;
+	if(res == RES_OK){
+		switch (pdrv)
+		{
+		case DRIVE_SD:
+			res =  sdmmc_storage_write(&sd_storage, sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_RAM:
+			res =  ram_disk_write(sector, count, (void *)buff);
+			break;
+		case DRIVE_EMMC:
+			res =  sdmmc_storage_write(&emmc_storage, sector, count, (void*)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_BIS:
+			res =  RES_WRPRT;
+			break;
+		case DRIVE_EMU:
+			res =  nx_emmc_bis_write(sector, count, (void *)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_BOOT1_1MB:
+			res =  sdmmc_storage_write(&emmc_storage, sector + (0x100000 / 512), count, (void*)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_BOOT1:
+			res =  sdmmc_storage_write(&emmc_storage, sector, count, (void*)buff) ? RES_OK : RES_ERROR;
+			break;
+		case DRIVE_SFD:
+			res =  sfd_write(sector, count, (void*)buff) ? RES_OK : RES_ERROR;
+			break;
+		}
 	}
 
-	return RES_ERROR;
+	restore_cur_partition(pdrv);
+
+	return res;
 }
 
 /*-----------------------------------------------------------------------*/

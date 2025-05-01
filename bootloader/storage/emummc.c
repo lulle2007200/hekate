@@ -14,6 +14,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <storage/sdmmc.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -307,4 +308,9 @@ int emummc_storage_set_mmc_partition(u32 partition)
 	}
 
 	return 1;
+}
+
+sdmmc_storage_t *emummc_get_storage(){
+	// TODO: should return &emummc_storage if emummc lives on emmc
+	return &sd_storage;
 }

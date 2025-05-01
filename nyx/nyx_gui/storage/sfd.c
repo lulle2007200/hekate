@@ -13,20 +13,28 @@ static void ensure_partition(){
 	}
 }
 
+sdmmc_storage_t *sfd_get_storage(){
+	return _storage;
+}
+
 int sfd_read(u32 sector, u32 count, void *buff){
+	int res;
 	if(sector + count > _size){
 		return 0;
 	}
 	ensure_partition();
-	return sdmmc_storage_read(_storage, sector + _offset, count, buff);
+	res = sdmmc_storage_read(_storage, sector + _offset, count, buff);
+	return res;
 }
 
 int sfd_write(u32 sector, u32 count, void *buff){
+	int res;
 	if(sector + count > _size){
 		return 0;
 	}
 	ensure_partition();
-	return sdmmc_storage_write(_storage, sector + _offset, count, buff);
+	res = sdmmc_storage_write(_storage, sector + _offset, count, buff);
+	return res;
 }
 
 bool sfd_init(sdmmc_storage_t *storage, u32 offset, u32 size){

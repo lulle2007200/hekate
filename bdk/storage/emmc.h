@@ -75,6 +75,7 @@ void emmc_gpt_free(link_t *gpt);
 emmc_part_t *emmc_part_find(link_t *gpt, const char *name);
 int  emmc_part_read(emmc_part_t *part, u32 sector_off, u32 num_sectors, void *buf);
 int  emmc_part_write(emmc_part_t *part, u32 sector_off, u32 num_sectors, void *buf);
+sdmmc_storage_t *emmc_part_get_storage();
 
 void nx_emmc_get_autorcm_masks(u8 *mod0, u8 *mod1);
 

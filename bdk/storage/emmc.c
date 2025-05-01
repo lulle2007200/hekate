@@ -240,6 +240,14 @@ int emmc_part_write(emmc_part_t *part, u32 sector_off, u32 num_sectors, void *bu
 #endif
 }
 
+sdmmc_storage_t *emmc_part_get_storage(){
+#ifdef BDK_EMUMMC_ENABLE
+	return emummc_get_storage();
+#else
+	return &emmc_storage;
+#endif
+}
+
 void nx_emmc_get_autorcm_masks(u8 *mod0, u8 *mod1)
 {
 	if (fuse_read_hw_state() == FUSE_NX_HW_STATE_PROD)

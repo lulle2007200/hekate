@@ -10,5 +10,6 @@ int sfd_write(u32 sector, u32 count, void *buff);
 bool sfd_init(sdmmc_storage_t *storage, u32 offset, u32 size);
 void sfd_end();
 
+sdmmc_storage_t *sfd_get_storage();
 
 #endif
