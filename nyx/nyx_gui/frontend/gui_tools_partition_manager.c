@@ -1525,7 +1525,11 @@ static lv_res_t _action_part_manager_flash_options0(lv_obj_t *btns, const char *
 	switch (btn_idx)
 	{
 	case 0:
-		action_ums_sd(btns);
+		if(part_info.drive == DRIVE_SD){
+			action_ums_sd(btns);
+		}else{
+			action_ums_emmc_gpp(btns);
+		}
 		lv_obj_del(ums_mbox);
 		break;
 	case 1:
@@ -1549,7 +1553,11 @@ static lv_res_t _action_part_manager_flash_options1(lv_obj_t *btns, const char *
 	switch (btn_idx)
 	{
 	case 0:
-		action_ums_sd(btns);
+		if(part_info.drive == DRIVE_SD){
+			action_ums_sd(btns);
+		}else{
+			action_ums_emmc_gpp(btns);
+		}
 		lv_obj_del(ums_mbox);
 		break;
 	case 1:
@@ -1571,7 +1579,11 @@ static lv_res_t _action_part_manager_flash_options2(lv_obj_t *btns, const char *
 	switch (btn_idx)
 	{
 	case 0:
-		action_ums_sd(btns);
+		if(part_info.drive == DRIVE_SD){
+			action_ums_sd(btns);
+		}else{
+			action_ums_emmc_gpp(btns);
+		}
 		lv_obj_del(ums_mbox);
 		break;
 	case 1:
@@ -2909,11 +2921,13 @@ static void _create_mbox_check_files_total_size(u8 drive)
 	else
 	{
 		if(res == FR_NO_FILESYSTEM){
+			// cant backup files because no filesystem
 			s_printf(txt_buf,
 				"#96FF00 No %s files to be backed up!#\n"
 				"#FFDD00 Any other partitions %swill be wiped!#\n", 
 				drive == DRIVE_SD ? "SD card" : "eMMC", drive == DRIVE_SD ? "" : "(except HOS ones) ");
 		}else{
+			// cant backup for some other reason
 			s_printf(txt_buf,
 				"#FFDD00 The %s files cannot be backed up automatically!#\n"
 				"#FFDD00 Any other partitions %swill be wiped!#\n\n"
