@@ -19,7 +19,9 @@
 #include <libs/lvgl/lv_core/lv_obj.h>
 #include <libs/lvgl/lv_misc/lv_area.h>
 #include <libs/lvgl/lv_objx/lv_bar.h>
+#include <libs/lvgl/lv_objx/lv_btnm.h>
 #include <libs/lvgl/lv_objx/lv_label.h>
+#include <libs/lvgl/lv_objx/lv_mbox.h>
 #include <libs/lvgl/lv_objx/lv_slider.h>
 #include <mem/heap.h>
 #include <memory_map.h>
@@ -134,8 +136,13 @@ typedef struct _l4t_flasher_ctxt_t
 	u32 image_size_sct;
 } l4t_flasher_ctxt_t;
 
+typedef struct _android_flasher_ctxt_t{
+	u32 slot;
+} android_flasher_ctxt_t;
+
 partition_ctxt_t part_info;
 l4t_flasher_ctxt_t l4t_flash_ctxt;
+android_flasher_ctxt_t android_flash_ctxt;
 
 lv_obj_t *btn_flash_l4t;
 lv_obj_t *btn_flash_android;
@@ -629,16 +636,16 @@ static void _prepare_and_flash_mbr_gpt()
 		u32 mbr_idx = 0;
 
 		if(hos_idx != -1){
-			mbr.partitions[hos_idx].type      = 0x0c; // fat32
-			mbr.partitions[hos_idx].start_sct = gpt->entries[hos_idx].lba_start;
-			mbr.partitions[hos_idx].size_sct  = gpt->entries[hos_idx].lba_end - gpt->entries[hos_idx].lba_start + 1;
+			mbr.partitions[mbr_idx].type      = 0x0c; // fat32
+			mbr.partitions[mbr_idx].start_sct = gpt->entries[hos_idx].lba_start;
+			mbr.partitions[mbr_idx].size_sct  = gpt->entries[hos_idx].lba_end - gpt->entries[hos_idx].lba_start + 1;
 			mbr_idx++;
 		}
 
 		if(!need_gpt && l4t_idx != -1){
-			mbr.partitions[l4t_idx].type      = 0x83; // linux partition
-			mbr.partitions[l4t_idx].start_sct = gpt->entries[l4t_idx].lba_start;
-			mbr.partitions[l4t_idx].size_sct  = gpt->entries[l4t_idx].lba_end - gpt->entries[l4t_idx].lba_start + 1;
+			mbr.partitions[mbr_idx].type      = 0x83; // linux partition
+			mbr.partitions[mbr_idx].start_sct = gpt->entries[l4t_idx].lba_start;
+			mbr.partitions[mbr_idx].size_sct  = gpt->entries[l4t_idx].lba_end - gpt->entries[l4t_idx].lba_start + 1;
 			mbr_idx++;
 		}
 
@@ -787,6 +794,13 @@ static lv_res_t _action_delete_linux_installer_files(lv_obj_t * btns, const char
 
 static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 {
+	boot_storage_mount();
+	if(part_info.drive == DRIVE_SD){
+		sd_mount();
+	}else{
+		emmc_mount();
+	}
+
 	int btn_idx = lv_btnm_get_pressed(btns);
 
 	// Delete parent mbox.
@@ -833,14 +847,6 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_top(mbox, true);
 
-	boot_storage_mount();
-
-	if(part_info.drive == DRIVE_SD){
-		sd_mount();
-	}else{
-		emmc_mount();
-	}
-
 	int res = 0;
 	char *path = malloc(1024);
 	char *txt_buf = malloc(SZ_4K);
@@ -852,6 +858,7 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 	res = f_open(&fp, path, FA_READ);
 	if (res)
 	{
+		gfx_printf("fopen res: %d\n", res);
 		lv_label_set_text(lbl_status, "#FFDD00 Error:# Failed to open 1st part!");
 
 		goto exit;
@@ -981,19 +988,18 @@ exit:
 	free(path);
 	free(txt_buf);
 
-	if (!succeeded)
-		lv_mbox_add_btns(mbox, mbox_btn_map, mbox_action);
-	else
-		lv_mbox_add_btns(mbox, mbox_btn_map2, _action_delete_linux_installer_files);
-	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
-
+	boot_storage_unmount();
 	if(part_info.drive == DRIVE_SD){
 		sd_unmount();
 	}else{
 		emmc_unmount();
 	}
-	
-	boot_storage_unmount();
+
+	if (!succeeded)
+		lv_mbox_add_btns(mbox, mbox_btn_map, mbox_action);
+	else
+		lv_mbox_add_btns(mbox, mbox_btn_map2, _action_delete_linux_installer_files);
+	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 
 	return LV_RES_INV;
 }
@@ -1112,6 +1118,11 @@ static lv_res_t _action_check_flash_linux(lv_obj_t *btn)
 	manual_system_maintenance(true);
 
 	boot_storage_mount();
+	if(part_info.drive == DRIVE_SD){
+		sd_mount();
+	}else{
+		emmc_mount();
+	}
 
 	// Check if L4T image exists.
 	strcpy(path, "switchroot/install/l4t.00");
@@ -1197,6 +1208,13 @@ error:
 	lv_mbox_add_btns(mbox, mbox_btn_map, mbox_action);
 
 exit:
+	boot_storage_unmount();
+	if(part_info.drive == DRIVE_SD){
+		sd_unmount();
+	}else{
+		emmc_unmount();
+	}
+
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 
 	boot_storage_unmount();
@@ -1221,11 +1239,16 @@ static lv_res_t _action_reboot_recovery(lv_obj_t * btns, const char * txt)
 
 		// Set id to Android.
 		strcpy((char *)b_cfg->id, "SWANDR");
+		if(android_flash_ctxt.slot > 1 && android_flash_ctxt.slot < 10){
+			s_printf((char*)(b_cfg->id + strlen((char*)b_cfg->id)), "%d", android_flash_ctxt.slot);
+		}
 
 		void (*main_ptr)() = (void *)nyx_str->hekate;
 
 		// Deinit hardware.
 		sd_end();
+		emmc_end();
+		boot_storage_end();
 		hw_deinit(false, 0);
 
 		// Chainload to hekate main.
@@ -1270,13 +1293,19 @@ static lv_res_t _action_flash_android_data(lv_obj_t * btns, const char * txt)
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_top(mbox, true);
 
+	sdmmc_storage_t *storage = part_info.drive == DRIVE_SD ? &sd_storage : &emmc_storage;
+
 	manual_system_maintenance(true);
 
-	sd_mount();
+	if(part_info.drive == DRIVE_SD){
+		sd_mount();
+	}else{
+		emmc_mount();
+	}
 	boot_storage_mount();
 
 	// Read main GPT.
-	sdmmc_storage_read(&sd_storage, 1, sizeof(gpt_t) >> 9, gpt);
+	sdmmc_storage_read(storage, 1, sizeof(gpt_t) >> 9, gpt);
 
 	// Validate GPT header.
 	if (memcmp(&gpt->header.signature, "EFI PART", 8) || gpt->header.num_part_ents > 128)
@@ -1287,6 +1316,8 @@ static lv_res_t _action_flash_android_data(lv_obj_t * btns, const char * txt)
 
 	u32 offset_sct = 0;
 	u32 size_sct = 0;
+	s32 gpt_idx = 0;
+	char name[36];
 
 	// Check if Kernel image should be flashed.
 	strcpy(path, "switchroot/install/boot.img");
@@ -1296,18 +1327,18 @@ static lv_res_t _action_flash_android_data(lv_obj_t * btns, const char * txt)
 		goto boot_img_not_found;
 	}
 
-	// Find Kernel partition.
-	for (u32 i = 0; i < gpt->header.num_part_ents; i++)
-	{
-		if (!memcmp(gpt->entries[i].name, (char[]) { 'L', 0, 'N', 0, 'X', 0 }, 6) || !memcmp(gpt->entries[i].name, (char[]) { 'b', 0, 'o', 0, 'o', 0, 't', 0 }, 8))
-		{
-			offset_sct = gpt->entries[i].lba_start;
-			size_sct = (gpt->entries[i].lba_end + 1) - gpt->entries[i].lba_start;
-			break;
-		}
 
-		if (i > 126)
-			break;
+	// find kernel partition
+	// look for dynamic boot partition
+	_make_part_name(name, "boot", android_flash_ctxt.slot);
+	gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	if(gpt_idx == -1){
+		_make_part_name(name, "LNX", android_flash_ctxt.slot);
+		gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	}
+	if(gpt_idx != -1){
+		offset_sct = gpt->entries[gpt_idx].lba_start;
+		size_sct = (gpt->entries[gpt_idx].lba_end + 1) - gpt->entries[gpt_idx].lba_start;
 	}
 
 	// Flash Kernel.
@@ -1329,7 +1360,7 @@ static lv_res_t _action_flash_android_data(lv_obj_t * btns, const char * txt)
 			s_printf(txt_buf, "#FF8000 Warning:# Kernel image too big!\n");
 		else
 		{
-			sdmmc_storage_write(&sd_storage, offset_sct, file_size >> 9, buf);
+			sdmmc_storage_write(storage, offset_sct, file_size >> 9, buf);
 
 			s_printf(txt_buf, "#C7EA46 Success:# Kernel image flashed!\n");
 			f_unlink(path);
@@ -1360,18 +1391,16 @@ boot_img_not_found:
 	offset_sct = 0;
 	size_sct = 0;
 
-	// Find Recovery partition.
-	for (u32 i = 0; i < gpt->header.num_part_ents; i++)
-	{
-		if (!memcmp(gpt->entries[i].name, (char[]) { 'S', 0, 'O', 0, 'S', 0 }, 6) || !memcmp(gpt->entries[i].name, (char[]) { 'r', 0, 'e', 0, 'c', 0, 'o', 0, 'v', 0, 'e', 0, 'r', 0, 'y', 0 }, 16))
-		{
-			offset_sct = gpt->entries[i].lba_start;
-			size_sct = (gpt->entries[i].lba_end + 1) - gpt->entries[i].lba_start;
-			break;
-		}
-
-		if (i > 126)
-			break;
+	// find recovery parititon
+	_make_part_name(name, "recovery", android_flash_ctxt.slot);
+	gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	if(gpt_idx == -1){
+		_make_part_name(name, "SOS", android_flash_ctxt.slot);
+		gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	}
+	if(gpt_idx != -1){
+		offset_sct = gpt->entries[gpt_idx].lba_start;
+		size_sct = (gpt->entries[gpt_idx].lba_end + 1) - gpt->entries[gpt_idx].lba_start;
 	}
 
 	// Flash Recovery.
@@ -1393,7 +1422,7 @@ boot_img_not_found:
 			strcat(txt_buf, "#FF8000 Warning:# Recovery image too big!\n");
 		else
 		{
-			sdmmc_storage_write(&sd_storage, offset_sct, file_size >> 9, buf);
+			sdmmc_storage_write(storage, offset_sct, file_size >> 9, buf);
 			strcat(txt_buf, "#C7EA46 Success:# Recovery image flashed!\n");
 			f_unlink(path);
 		}
@@ -1422,18 +1451,16 @@ recovery_not_found:
 	offset_sct = 0;
 	size_sct = 0;
 
-	// Find Device Tree partition.
-	for (u32 i = 0; i < gpt->header.num_part_ents; i++)
-	{
-		if (!memcmp(gpt->entries[i].name, (char[]) { 'D', 0, 'T', 0, 'B', 0 }, 6) || !memcmp(gpt->entries[i].name, (char[]) { 'd', 0, 't', 0, 'b', 0 }, 6))
-		{
-			offset_sct = gpt->entries[i].lba_start;
-			size_sct = (gpt->entries[i].lba_end + 1) - gpt->entries[i].lba_start;
-			break;
-		}
-
-		if (i > 126)
-			break;
+	// find dtb partition
+	_make_part_name(name, "dtb", android_flash_ctxt.slot);
+	gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	if(gpt_idx == -1){
+		_make_part_name(name, "DTB", android_flash_ctxt.slot);
+		gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	}
+	if(gpt_idx != -1){
+		offset_sct = gpt->entries[gpt_idx].lba_start;
+		size_sct = (gpt->entries[gpt_idx].lba_end + 1) - gpt->entries[gpt_idx].lba_start;
 	}
 
 	// Flash Device Tree.
@@ -1455,7 +1482,7 @@ recovery_not_found:
 			strcat(txt_buf, "#FF8000 Warning:# DTB image too big!");
 		else
 		{
-			sdmmc_storage_write(&sd_storage, offset_sct, file_size >> 9, buf);
+			sdmmc_storage_write(storage, offset_sct, file_size >> 9, buf);
 			strcat(txt_buf, "#C7EA46 Success:# DTB image flashed!");
 			f_unlink(path);
 		}
@@ -1468,21 +1495,27 @@ recovery_not_found:
 dtb_not_found:
 	lv_label_set_text(lbl_status, txt_buf);
 
-	// Check if Recovery is flashed unconditionally.
-	for (u32 i = 0; i < gpt->header.num_part_ents; i++)
-	{
-		if (!memcmp(gpt->entries[i].name, (char[]) { 'S', 0, 'O', 0, 'S', 0 }, 6) || !memcmp(gpt->entries[i].name, (char[]) { 'r', 0, 'e', 0, 'c', 0, 'o', 0, 'v', 0, 'e', 0, 'r', 0, 'y', 0 }, 16))
-		{
-			u8 *buf = malloc(SD_BLOCKSIZE);
-			sdmmc_storage_read(&sd_storage, gpt->entries[i].lba_start, 1, buf);
-			if (!memcmp(buf, "ANDROID", 7))
-				boot_recovery = true;
-			free(buf);
-			break;
-		}
+	offset_sct = 0;
 
-		if (i > 126)
-			break;
+	// find recovery parititon
+	_make_part_name(name, "recovery", android_flash_ctxt.slot);
+	gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	if(gpt_idx == -1){
+		_make_part_name(name, "SOS", android_flash_ctxt.slot);
+		gpt_idx = _get_gpt_part_by_name(gpt, name, -1);
+	}
+	if(gpt_idx != -1){
+		offset_sct = gpt->entries[gpt_idx].lba_start;
+	}
+
+	// unconditionally check for valid recovery
+	if(offset_sct){
+		u8 *buf = malloc(SD_BLOCKSIZE);
+		sdmmc_storage_read(storage, offset_sct, 1, buf);
+		if(!memcmp(buf, "ANDROID", 7)){
+			boot_recovery = true;
+		}
+		free(buf);
 	}
 
 error:
@@ -1501,7 +1534,11 @@ error:
 	free(txt_buf);
 	free(gpt);
 
-	sd_unmount();
+	if(part_info.drive == DRIVE_SD){
+		sd_unmount();
+	}else{
+		emmc_unmount();
+	}
 	boot_storage_unmount();
 
 	return LV_RES_INV;
@@ -1534,6 +1571,115 @@ static lv_res_t _action_flash_android(lv_obj_t *btn)
 	return LV_RES_OK;
 }
 
+static u32 _get_num_slots_android(){
+	sdmmc_storage_t *storage = part_info.drive == DRIVE_SD ? &sd_storage : &emmc_storage;
+
+	u32 res = 0;
+
+	mbr_t mbr;
+	gpt_t *gpt = NULL;
+	sdmmc_storage_read(storage, 0, 1, &mbr);
+
+	if(!_has_gpt(&mbr)){
+		goto out;
+	}
+
+	gpt = zalloc(sizeof(*gpt));
+
+	sdmmc_storage_read(storage, 1, sizeof(*gpt) / 0x200, gpt);
+
+	if(memcmp(&gpt->header.signature, "EFI PART", 8)){
+		goto out;
+	}
+
+	s32 gpt_idx = -1;
+	// check for dynamic
+	gpt_idx = _get_gpt_part_by_name(gpt, "boot", gpt_idx);
+	if(gpt_idx != -1){
+		res++;
+		gpt_idx = _get_gpt_part_by_name(gpt, "boot", gpt_idx);
+		if(gpt_idx != -1){
+			res++;
+		}
+		goto out;
+	}
+
+	gpt_idx = -1;
+	// check for legacy
+	gpt_idx = _get_gpt_part_by_name(gpt, "LNX", gpt_idx);
+	if(gpt_idx != -1){
+		res++;
+		gpt_idx = _get_gpt_part_by_name(gpt, "LNX", gpt_idx);
+		if(gpt_idx != -1){
+			res++;
+		}
+		goto out;
+	}
+
+	out:
+	free(gpt);
+	return res;
+}
+
+static lv_res_t _action_flash_android_slot_select1(lv_obj_t *btns, const char *txt){
+	int btn_idx = lv_btnm_get_pressed(btns);
+
+	switch(btn_idx){
+	case 0:
+		android_flash_ctxt.slot = 1;
+		break;
+	case 1:
+		android_flash_ctxt.slot = 2;
+		break;
+	}
+
+	mbox_action(btns, txt);
+
+	return _action_flash_android(NULL);
+}
+
+static lv_res_t _action_flash_android_slot_select(lv_obj_t *btn){
+	u32 n_slots = _get_num_slots_android();
+
+	if(n_slots == 1){
+		android_flash_ctxt.slot = 1;
+		return _action_flash_android(NULL);
+	}
+
+	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
+	lv_obj_set_style(dark_bg, &mbox_darken);
+	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
+
+	static const char *mbox_btn_map[] = { "\222Slot 1", "\222Slot 2", "" };
+	static const char *mbox_btn_map2[] = { "\222OK", ""};
+
+	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
+	lv_mbox_set_recolor_text(mbox, true);
+
+	lv_obj_set_width(mbox, LV_HOR_RES / 10 * 5);
+	lv_mbox_set_text(mbox, "#FF8000 Android Flasher#");
+
+	lv_obj_t *lbl_status = lv_label_create(mbox, NULL);
+	lv_label_set_recolor(lbl_status, true);
+
+
+	if(n_slots == 0){
+		lv_label_set_text(lbl_status,
+			"No Android partitions found!\n");
+		lv_mbox_add_btns(mbox, mbox_btn_map2, mbox_action);
+	}else{
+		lv_label_set_text(lbl_status,
+		                  "Found multible sets of Android partitions.\n"
+		                  "Please select the slot to use\n");
+		lv_mbox_add_btns(mbox, mbox_btn_map, _action_flash_android_slot_select1);
+	}
+
+	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+	lv_obj_set_top(mbox, true);
+
+	return LV_RES_OK;
+}
+
 static lv_res_t _action_part_manager_flash_options0(lv_obj_t *btns, const char *txt)
 {
 	int btn_idx = lv_btnm_get_pressed(btns);
@@ -1552,7 +1698,7 @@ static lv_res_t _action_part_manager_flash_options0(lv_obj_t *btns, const char *
 		_action_check_flash_linux(btns);
 		break;
 	case 2:
-		_action_flash_android(btns);
+		_action_flash_android_slot_select(btns);
 		break;
 	case 3:
 		mbox_action(btns, txt);
@@ -1604,7 +1750,7 @@ static lv_res_t _action_part_manager_flash_options2(lv_obj_t *btns, const char *
 		break;
 	case 1:
 		mbox_action(btns, txt);
-		_action_flash_android(NULL);
+		_action_flash_android_slot_select(NULL);
 		return LV_RES_INV;
 	case 2:
 		mbox_action(btns, txt);
@@ -3968,7 +4114,7 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 		break;
 	}
 	lv_obj_align(btn_flash_android, btn_flash_l4t, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 3, 0);
-	lv_btn_set_action(btn_flash_android, LV_BTN_ACTION_CLICK, _action_flash_android);
+	lv_btn_set_action(btn_flash_android, LV_BTN_ACTION_CLICK, _action_flash_android_slot_select);
 
 	// Create next step button.
 	btn1 = lv_btn_create(h1, NULL);
