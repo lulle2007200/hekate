@@ -834,7 +834,12 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 	lv_obj_set_top(mbox, true);
 
 	boot_storage_mount();
-	sd_mount();
+
+	if(part_info.drive == DRIVE_SD){
+		sd_mount();
+	}else{
+		emmc_mount();
+	}
 
 	int res = 0;
 	char *path = malloc(1024);
@@ -865,6 +870,8 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 
 	u8 *buf = (u8 *)MIXD_BUF_ALIGNED;
 	DWORD *clmt = f_expand_cltbl(&fp, SZ_4M, 0);
+
+	sdmmc_storage_t *storage = part_info.drive == DRIVE_SD ? &sd_storage : &emmc_storage;
 
 	// Start flashing L4T.
 	while (total_size_sct > 0)
@@ -910,7 +917,9 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 
 		if (res)
 		{
-			lv_label_set_text(lbl_status, "#FFDD00 Error:# Reading from SD!");
+			char msg[0x30];
+			s_printf(msg, "#FFDD00 Error:# Reading from %s!", part_info.drive == DRIVE_SD ? "SD" : "eMMC");
+			lv_label_set_text(lbl_status, msg);
 			manual_system_maintenance(true);
 
 			f_close(&fp);
@@ -919,7 +928,7 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 		}
 
 		// Write data block to L4T partition.
-		res = !sdmmc_storage_write(&sd_storage, lba_curr + l4t_flash_ctxt.offset_sct, num, buf);
+		res = !sdmmc_storage_write(storage, lba_curr + l4t_flash_ctxt.offset_sct, num, buf);
 
 		manual_system_maintenance(false);
 
@@ -939,7 +948,7 @@ static lv_res_t _action_flash_linux_data(lv_obj_t * btns, const char * txt)
 				goto exit;
 			}
 
-			res = !sdmmc_storage_write(&sd_storage, lba_curr + l4t_flash_ctxt.offset_sct, num, buf);
+			res = !sdmmc_storage_write(storage, lba_curr + l4t_flash_ctxt.offset_sct, num, buf);
 			manual_system_maintenance(false);
 		}
 
@@ -978,7 +987,12 @@ exit:
 		lv_mbox_add_btns(mbox, mbox_btn_map2, _action_delete_linux_installer_files);
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 
-	sd_unmount();
+	if(part_info.drive == DRIVE_SD){
+		sd_unmount();
+	}else{
+		emmc_unmount();
+	}
+	
 	boot_storage_unmount();
 
 	return LV_RES_INV;
@@ -986,16 +1000,18 @@ exit:
 
 static u32 _get_available_l4t_partition()
 {
+	sdmmc_storage_t *storage = part_info.drive == DRIVE_SD ? &sd_storage : &emmc_storage;
+
 	mbr_t mbr = { 0 };
 	gpt_t *gpt = zalloc(sizeof(gpt_t));
 
 	memset(&l4t_flash_ctxt, 0, sizeof(l4t_flasher_ctxt_t));
 
 	// Read MBR.
-	sdmmc_storage_read(&sd_storage, 0, 1, &mbr);
+	sdmmc_storage_read(storage, 0, 1, &mbr);
 
 	// Read main GPT.
-	sdmmc_storage_read(&sd_storage, 1, sizeof(gpt_t) >> 9, gpt);
+	sdmmc_storage_read(storage, 1, sizeof(gpt_t) >> 9, gpt);
 
 	// Search for a suitable partition.
 	u32 size_sct = 0;
