@@ -122,7 +122,7 @@ static bool _boot_storage_mount(){
 		res = f_mount(&boot_storage_fs, drive_base_paths[emmc_drives[i]], true);
 		if(res == FR_OK){
 			gfx_printf("trying %s\n", drive_base_paths[emmc_drives[i]]);
-			res = f_chdrive(drive_base_paths[i]);
+			res = f_chdrive(drive_base_paths[emmc_drives[i]]);
 			if(res == FR_OK && _is_eligible()){
 				gfx_printf("%s ok\n", drive_base_paths[emmc_drives[i]]);
 				drive_cur = emmc_drives[i];
