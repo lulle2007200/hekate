@@ -779,7 +779,7 @@ static lv_res_t _create_window_usb_tools(lv_obj_t *parent)
 	// Create Boot Storage UMS button
 	lv_obj_t *btn_boot_strg = lv_btn_create(h1, btn1);
 	label_btn = lv_label_create(btn_boot_strg, NULL);
-	lv_label_set_text(label_btn, SYMBOL_SD " Boot Storage");
+	lv_label_set_text(label_btn, boot_storage_get_drive() == DRIVE_SD ? SYMBOL_SD " Boot Storage" : SYMBOL_CHIP " Boot Storage");
 	lv_obj_align(btn_boot_strg, btn1, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 10, 0);
 	lv_btn_set_action(btn_boot_strg, LV_BTN_ACTION_CLICK, _action_ums_boot_storage);
 	
