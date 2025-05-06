@@ -23,6 +23,7 @@
 
 #include <bdk.h>
 
+#include "../frontend/fe_emusd_tools.h"
 #include "gui.h"
 #include "gui_tools.h"
 #include "gui_tools_partition_manager.h"
@@ -39,6 +40,7 @@
 #include <storage/sd.h>
 #include <storage/sdmmc.h>
 #include <string.h>
+#include <usb/usbd.h>
 #include <utils/types.h>
 
 extern volatile boot_cfg_t *b_cfg;
@@ -276,6 +278,9 @@ static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs, u32 part)
 		case NYX_UMS_BOOT_STRG_SD:
 			strcat(txt_buf, "Boot storage (SD Card)");
 			break;
+		case NYX_UMS_EMUSD:
+			strcat(txt_buf, "emuSD");
+			break;
 	}
 
 	lv_mbox_set_text(mbox, txt_buf);
@@ -367,6 +372,9 @@ static lv_res_t _create_mbox_ums_error(int error)
 		break;
 	case 6:
 		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Corrupt emuMMC partition!#");
+		break;
+	case 7:
+		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 No emuSD found active!#");
 		break;
 	}
 
@@ -538,6 +546,53 @@ static lv_res_t _action_ums_emmc_boot1(lv_obj_t *btn)
 lv_res_t action_ums_emmc_gpp(lv_obj_t *btn)
 {
 	return _ums_emmc(NYX_UMS_EMMC_GPP);
+}
+
+static lv_res_t _action_ums_emusd(lv_obj_t * btn){
+	if(!nyx_emmc_check_battery_enough()){
+		return LV_RES_OK;
+	}
+
+	usb_ctxt_t usbs;
+	emusd_cfg_t emu_info;
+
+	int error = !boot_storage_mount();
+
+	if(!error){
+		load_emusd_cfg(&emu_info);
+		if(emu_info.enabled){
+			if(!emmc_initialize(false)){
+				error = 3;
+			}else{
+				mbr_t mbr = {0};
+
+				if(sdmmc_storage_read(&emmc_storage, emu_info.sector, 1, &mbr)){
+					error = 0;
+					usbs.offset = emu_info.sector;
+					usbs.sectors = mbr.partitions[0].size_sct;
+					usbs.type = MMC_EMMC;
+					usbs.partition = EMMC_GPP + 1;
+					usbs.ro = false;
+					usbs.system_maintenance = &manual_system_maintenance;
+					usbs.set_text = &usb_gadget_set_text;
+				}else{
+					error = 3;
+				}
+			}
+		}else{
+			error = 7;
+		}
+	}
+
+	if(error){
+		_create_mbox_ums_error(error);
+	}else{
+		_create_mbox_ums(&usbs, NYX_UMS_EMUSD);
+	}
+
+	boot_storage_unmount();
+
+	return LV_RES_OK;
 }
 
 static lv_res_t _ums_emummc(u32 part){
@@ -731,17 +786,24 @@ static lv_res_t _create_window_usb_tools(lv_obj_t *parent)
 	lv_obj_t *label_txt2 = lv_label_create(h1, NULL);
 	lv_label_set_recolor(label_txt2, true);
 	lv_label_set_static_text(label_txt2,
-		"Allows you to mount the SD Card or boot storage to a PC/Phone.\n"
+		"Allows you to mount the SD Card or boot drive to a PC/Phone.\n"
 		"#C7EA46 All operating systems are supported. Access is# #FF8000 Read/Write.#");
 
 	lv_obj_set_style(label_txt2, &hint_small_style);
 	lv_obj_align(label_txt2, btn1, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPI / 3);
 
+	// Create emuSD button
+	lv_obj_t *btn_emusd = lv_btn_create(h1, btn1);
+	label_btn = lv_label_create(btn_emusd, NULL);
+	lv_label_set_text(label_btn, SYMBOL_MODULES_ALT " emuSD");
+	lv_obj_align(btn_emusd, btn1, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 10, 0);
+	lv_btn_set_action(btn_emusd, LV_BTN_ACTION_CLICK, _action_ums_emusd);
+	
 	// Create Boot Storage UMS button
 	lv_obj_t *btn_boot_strg = lv_btn_create(h1, btn1);
 	label_btn = lv_label_create(btn_boot_strg, NULL);
-	lv_label_set_text(label_btn, boot_storage_get_drive() == DRIVE_SD ? SYMBOL_SD " Boot Storage" : SYMBOL_CHIP " Boot Storage");
-	lv_obj_align(btn_boot_strg, btn1, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 10, 0);
+	lv_label_set_text(label_btn, boot_storage_get_drive() == DRIVE_SD ? SYMBOL_SD " Boot Drive" : SYMBOL_CHIP " Boot Drive");
+	lv_obj_align(btn_boot_strg, btn_emusd, LV_ALIGN_OUT_RIGHT_MID, LV_DPI / 10, 0);
 	lv_btn_set_action(btn_boot_strg, LV_BTN_ACTION_CLICK, _action_ums_boot_storage);
 	
 	if(!boot_storage_mount()){
@@ -749,6 +811,7 @@ static lv_res_t _create_window_usb_tools(lv_obj_t *parent)
 		lv_btn_set_state(btn_boot_strg, LV_BTN_STATE_INA);
 	}
 	boot_storage_unmount();
+
 
 
 	// Create RAW GPP button.

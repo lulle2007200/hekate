@@ -134,6 +134,7 @@ typedef enum _nyx_ums_type
 	NYX_UMS_BOOT_STRG_BOOT1,
 	NYX_UMS_BOOT_STRG_BOOT1_1MB,
 	NYX_UMS_BOOT_STRG_GPP,
+	NYX_UMS_EMUSD,
 } nyx_ums_type;
 
 typedef struct __attribute__((__packed__)) _boot_cfg_t
