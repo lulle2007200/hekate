@@ -269,14 +269,14 @@ static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs, u32 part)
 			strcat(txt_buf, "SD Card");
 			break;
 		case NYX_UMS_BOOT_STRG_GPP:
-			strcat(txt_buf, "Boot storage (eMMC GPP)");
+			strcat(txt_buf, "Boot drive (eMMC GPP)");
 			break;
 		case NYX_UMS_BOOT_STRG_BOOT1:
 		case NYX_UMS_BOOT_STRG_BOOT1_1MB:
-			strcat(txt_buf, "Boot storage (eMMC BOOT1)");
+			strcat(txt_buf, "Boot drive (eMMC BOOT1)");
 			break;
 		case NYX_UMS_BOOT_STRG_SD:
-			strcat(txt_buf, "Boot storage (SD Card)");
+			strcat(txt_buf, "Boot drive (SD Card)");
 			break;
 		case NYX_UMS_EMUSD:
 			strcat(txt_buf, "emuSD");
@@ -356,7 +356,7 @@ static lv_res_t _create_mbox_ums_error(int error)
 	switch (error)
 	{
 	case 1:
-		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Error mounting boot storage!#");
+		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Error mounting boot drive!#");
 		break;
 	case 2:
 		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 No emuMMC found active!#");
