@@ -2045,8 +2045,6 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 		sfd_init(storage, hos_start, hos_size);
 		u32 mkfs_error = _format_fat_partition("sfd:", FM_FAT32 | FM_SFD);
 	
-		DBG_PRINT("format done");	
-
 		u8 *buf = malloc(0x200);
 
 		if(mkfs_error != FR_OK){
@@ -3174,9 +3172,11 @@ static void _create_mbox_check_files_total_size(u8 drive)
 			}
 
 			if(!memcmp(entry->name, (char[]){ 'e', 0, 'm', 0, 'u', 0, 's', 0, 'd', 0, '_', 0, 'm', 0, 'b', 0, 'r', 0 }, 18)){
-				if(!memcmp(entry->name, (char[]){ 'e', 0, 'm', 0, 'u', 0, 's', 0, 'd', 0 }, 10)){
-					bar_emu_sd_size += gpt->entries[i + 1].lba_end - gpt->entries[i].lba_start + 1;
-					i++;
+				if((i + 1) < gpt->header.num_part_ents && (i + 1) < 128){
+					if(!memcmp(gpt->entries[i + 1].name, (char[]){ 'e', 0, 'm', 0, 'u', 0, 's', 0, 'd', 0 }, 10)){
+						bar_emu_sd_size += gpt->entries[i + 1].lba_end - gpt->entries[i].lba_start + 1;
+						i++;
+					}
 				}
 			}
 		}
@@ -3193,6 +3193,8 @@ static void _create_mbox_check_files_total_size(u8 drive)
 	bar_hos_size       = w * (bar_hos_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
 	bar_emu_size       = w * (bar_emu_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
 	bar_emu_sd_size    = w * (bar_emu_sd_size    / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
+	// bar_remaining_size = w - bar_emu_sd_size - bar_emu_size - bar_hos_size - bar_hos_os_size - bar_and_size - bar_l4t_size;
+	// bar_remaining_size = bar_remaining_size <= 7 ? 0 : bar_remaining_size;
 
 	// Create HOS OS bar.
 	lv_obj_t *bar_hos_os = lv_bar_create(h1, NULL);

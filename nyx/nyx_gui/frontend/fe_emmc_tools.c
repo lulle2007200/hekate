@@ -1362,7 +1362,7 @@ multipart_not_allowed:
 		f_close(&fp_raw);
 
 		s_printf(sdPath, "emuMMC/RAW%d", part_idx);
-		save_emummc_cfg(part_idx, sector_start, sdPath);
+		save_emummc_cfg(part_idx, sector_start, sdPath, DRIVE_SD);
 	}
 
 	return 1;

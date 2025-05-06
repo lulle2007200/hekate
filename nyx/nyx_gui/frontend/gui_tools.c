@@ -34,8 +34,12 @@
 #include "../hos/hos.h"
 #include <libs/fatfs/ff.h>
 #include <storage/boot_storage.h>
+#include <storage/emmc.h>
+#include <storage/mbr_gpt.h>
+#include <storage/sd.h>
 #include <storage/sdmmc.h>
 #include <string.h>
+#include <utils/types.h>
 
 extern volatile boot_cfg_t *b_cfg;
 extern hekate_config h_cfg;
@@ -225,7 +229,7 @@ static lv_res_t _create_mbox_hid(usb_ctxt_t *usbs)
 	return LV_RES_OK;
 }
 
-static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs)
+static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs, u32 part)
 {
 	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
 	lv_obj_set_style(dark_bg, &mbox_darken);
@@ -240,38 +244,38 @@ static lv_res_t _create_mbox_ums(usb_ctxt_t *usbs)
 
 	s_printf(txt_buf, "#FF8000 USB Mass Storage#\n\n#C7EA46 Device:# ");
 
-	if (usbs->type == MMC_SD)
-	{
-		switch (usbs->partition)
-		{
-		case 0:
-			strcat(txt_buf, "SD Card");
-			break;
-		case EMMC_GPP + 1:
-			strcat(txt_buf, "emuMMC GPP");
-			break;
-		case EMMC_BOOT0 + 1:
-			strcat(txt_buf, "emuMMC BOOT0");
-			break;
-		case EMMC_BOOT1 + 1:
-			strcat(txt_buf, "emuMMC BOOT1");
-			break;
-		}
-	}
-	else
-	{
-		switch (usbs->partition)
-		{
-		case EMMC_GPP + 1:
-			strcat(txt_buf, "eMMC GPP");
-			break;
-		case EMMC_BOOT0 + 1:
+	switch(part){
+		case NYX_UMS_EMMC_BOOT0:
 			strcat(txt_buf, "eMMC BOOT0");
 			break;
-		case EMMC_BOOT1 + 1:
+		case NYX_UMS_EMMC_BOOT1:
 			strcat(txt_buf, "eMMC BOOT1");
 			break;
-		}
+		case NYX_UMS_EMMC_GPP:
+			strcat(txt_buf, "eMMC GPP");
+			break;
+		case NYX_UMS_EMUMMC_GPP:
+			strcat(txt_buf, "emuMMC GPP");
+			break;
+		case NYX_UMS_EMUMMC_BOOT0:
+			strcat(txt_buf, "emuMMC BOOT0");
+			break;
+		case NYX_UMS_EMUMMC_BOOT1:
+			strcat(txt_buf, "emuMMC BOOT1");
+			break;
+		case NYX_UMS_SD_CARD:
+			strcat(txt_buf, "SD Card");
+			break;
+		case NYX_UMS_BOOT_STRG_GPP:
+			strcat(txt_buf, "Boot storage (eMMC GPP)");
+			break;
+		case NYX_UMS_BOOT_STRG_BOOT1:
+		case NYX_UMS_BOOT_STRG_BOOT1_1MB:
+			strcat(txt_buf, "Boot storage (eMMC BOOT1)");
+			break;
+		case NYX_UMS_BOOT_STRG_SD:
+			strcat(txt_buf, "Boot storage (SD Card)");
+			break;
 	}
 
 	lv_mbox_set_text(mbox, txt_buf);
@@ -333,6 +337,13 @@ static lv_res_t _create_mbox_ums_error(int error)
 	lv_obj_set_style(dark_bg, &mbox_darken);
 	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
+
+	// 1: boot storage fail
+	// 2: no emu active
+	// 3: emmc fail
+	// 4: sd fail
+	// 5: file based
+
 	static const char *mbox_btn_map[] = { "\251", "\222OK", "\251", "" };
 	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
@@ -340,13 +351,22 @@ static lv_res_t _create_mbox_ums_error(int error)
 	switch (error)
 	{
 	case 1:
-		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Error mounting SD Card!#");
+		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Error mounting boot storage!#");
 		break;
 	case 2:
 		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 No emuMMC found active!#");
 		break;
 	case 3:
+		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Failed to initialize eMMC!#");
+		break;
+	case 4:
+		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Failed to initialize SD Card!#");
+		break;
+	case 5:
 		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Active emuMMC is not partition based!#");
+		break;
+	case 6:
+		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Corrupt emuMMC partition!#");
 		break;
 	}
 
@@ -424,26 +444,7 @@ lv_res_t action_ums_sd(lv_obj_t *btn)
 	usbs.system_maintenance = &manual_system_maintenance;
 	usbs.set_text = &usb_gadget_set_text;
 
-	_create_mbox_ums(&usbs);
-
-	return LV_RES_OK;
-}
-
-static lv_res_t _action_ums_emmc_boot0(lv_obj_t *btn)
-{
-	if (!nyx_emmc_check_battery_enough())
-		return LV_RES_OK;
-
-	usb_ctxt_t usbs;
-	usbs.type = MMC_EMMC;
-	usbs.partition = EMMC_BOOT0 + 1;
-	usbs.offset = 0;
-	usbs.sectors = 0;
-	usbs.ro = usb_msc_emmc_read_only;
-	usbs.system_maintenance = &manual_system_maintenance;
-	usbs.set_text = &usb_gadget_set_text;
-
-	_create_mbox_ums(&usbs);
+	_create_mbox_ums(&usbs, NYX_UMS_SD_CARD);
 
 	return LV_RES_OK;
 }
@@ -457,228 +458,188 @@ static lv_res_t _action_ums_boot_storage(lv_obj_t *btn){
 
 	u8 drive = boot_storage_get_drive();
 
+	u32 part;
+
 	usb_ctxt_t usbs;
 	usbs.type = drive == DRIVE_SD ? MMC_SD : MMC_EMMC;
 	switch(drive){
 	case DRIVE_EMMC:
+		part = NYX_UMS_BOOT_STRG_GPP;
 		usbs.partition = EMMC_GPP + 1;
 		break;
 	case DRIVE_BOOT1:
+		part = NYX_UMS_BOOT_STRG_BOOT1;
+		usbs.partition = EMMC_BOOT1 + 1;
+		break;
 	case DRIVE_BOOT1_1MB:
+		part = NYX_UMS_BOOT_STRG_BOOT1_1MB;
 		usbs.partition = EMMC_BOOT1 + 1;
 		break;
 	case DRIVE_SD:
+		part = NYX_UMS_BOOT_STRG_SD;
 		usbs.partition = 0;
 		break;
 	default:
 		boot_storage_unmount();
 		return LV_RES_OK;
 	}
+
 	usbs.offset = drive == DRIVE_BOOT1_1MB ? (0x100000 / 0x200) : 0;
 	usbs.sectors = 0;
 	usbs.ro = false;
 	usbs.system_maintenance = &manual_system_maintenance;
 	usbs.set_text = &usb_gadget_set_text;
 
-	_create_mbox_ums(&usbs);
+	_create_mbox_ums(&usbs, part);
 
 	boot_storage_unmount();
 
 	return LV_RES_OK;
 }
 
-static lv_res_t _action_ums_emmc_boot1(lv_obj_t *btn)
-{
+static lv_res_t _ums_emmc(u32 part){
 	if (!nyx_emmc_check_battery_enough())
 		return LV_RES_OK;
 
 	usb_ctxt_t usbs;
 	usbs.type = MMC_EMMC;
-	usbs.partition = EMMC_BOOT1 + 1;
+
+	switch(part){
+		case NYX_UMS_EMMC_BOOT0:
+			usbs.partition = EMMC_BOOT0 + 1;
+			break;
+		case NYX_UMS_EMMC_BOOT1:
+			usbs.partition = EMMC_BOOT1 + 1;
+			break;
+		case NYX_UMS_EMMC_GPP:
+			usbs.partition = EMMC_GPP + 1;
+			break;
+	}
+
 	usbs.offset = 0;
 	usbs.sectors = 0;
 	usbs.ro = usb_msc_emmc_read_only;
 	usbs.system_maintenance = &manual_system_maintenance;
 	usbs.set_text = &usb_gadget_set_text;
 
-	_create_mbox_ums(&usbs);
+	return _create_mbox_ums(&usbs, part);
+}
 
-	return LV_RES_OK;
+static lv_res_t _action_ums_emmc_boot0(lv_obj_t *btn)
+{
+	return _ums_emmc(NYX_UMS_EMMC_BOOT0);
+}
+
+static lv_res_t _action_ums_emmc_boot1(lv_obj_t *btn)
+{
+	return _ums_emmc(NYX_UMS_EMMC_BOOT1);
 }
 
 lv_res_t action_ums_emmc_gpp(lv_obj_t *btn)
 {
+	return _ums_emmc(NYX_UMS_EMMC_GPP);
+}
+
+static lv_res_t _ums_emummc(u32 part){
 	if (!nyx_emmc_check_battery_enough())
 		return LV_RES_OK;
 
 	usb_ctxt_t usbs;
-	usbs.type = MMC_EMMC;
-	usbs.partition = EMMC_GPP + 1;
-	usbs.offset = 0;
-	usbs.sectors = 0;
-	usbs.ro = usb_msc_emmc_read_only;
-	usbs.system_maintenance = &manual_system_maintenance;
-	usbs.set_text = &usb_gadget_set_text;
+	sdmmc_storage_t *storage;
+	emummc_cfg_t emu_info;
 
-	_create_mbox_ums(&usbs);
+	int error = !boot_storage_mount();
+
+	if(!error){
+		load_emummc_cfg(&emu_info);
+		if(emu_info.enabled){
+			error = 0;
+			if(emu_info.enabled == 4){
+				// emmc raw based
+				if(!emmc_initialize(false)){
+					error = 3;
+				}
+				storage = &emmc_storage;
+			}else if(emu_info.enabled == 1 && emu_info.sector){
+				// sd raw based
+				if(!sd_initialize(false)){
+					error = 4;
+				}
+				storage = &sd_storage;
+			}else if(emu_info.enabled == 1 && !emu_info.sector){
+				// sd file based
+				error = 5;
+			}
+		}else{
+			error = 2;
+		}
+
+		if(error == 0 && (emu_info.enabled == 4 || (emu_info.enabled == 1 && emu_info.sector))){
+			error = 6;
+			usbs.offset = emu_info.sector;
+			switch(part){
+			case NYX_UMS_EMUMMC_BOOT0:
+				usbs.offset += 0;
+				break;
+			case NYX_UMS_EMUMMC_BOOT1:
+				usbs.offset += 0x2000;
+				break;
+			case NYX_UMS_EMUMMC_GPP:
+				usbs.offset += 0x4000;
+				break;
+			}
+
+			if(part == NYX_UMS_EMUMMC_GPP){
+				gpt_header_t *gpt_hdr = malloc(sizeof(*gpt_hdr));
+				if(sdmmc_storage_read(storage, usbs.offset + 1, 1, gpt_hdr)){
+					if(!memcmp(&gpt_hdr->signature, "EFI PART", 8)){
+						error = 0;
+						usbs.sectors = gpt_hdr->alt_lba + 1;
+					}
+				}
+				free(gpt_hdr);
+			}else{
+				usbs.sectors = 0x2000;
+			}
+		}
+
+		if(emu_info.path){
+			free(emu_info.path);
+		}
+		if(emu_info.nintendo_path){
+			free(emu_info.nintendo_path);
+		}
+	}
+
+	if(error){
+		_create_mbox_ums_error(error);
+	}else{
+		usbs.type = emu_info.enabled == 4 ? MMC_EMMC : MMC_SD;
+		usbs.partition = EMMC_GPP + 1;
+		usbs.ro = usb_msc_emmc_read_only;
+		usbs.system_maintenance = &manual_system_maintenance;
+		usbs.set_text = &usb_gadget_set_text;
+		_create_mbox_ums(&usbs, part);
+	}
+
+	boot_storage_unmount();
 
 	return LV_RES_OK;
 }
 
 static lv_res_t _action_ums_emuemmc_boot0(lv_obj_t *btn)
 {
-	if (!nyx_emmc_check_battery_enough())
-		return LV_RES_OK;
-
-	usb_ctxt_t usbs;
-
-	int error = !sd_mount();
-	error &= boot_storage_mount();
-	if (!error)
-	{
-		emummc_cfg_t emu_info;
-		load_emummc_cfg(&emu_info);
-
-		error = 2;
-		if (emu_info.enabled)
-		{
-			error = 3;
-			if (emu_info.sector)
-			{
-				error = 0;
-				usbs.offset = emu_info.sector;
-			}
-		}
-
-		if (emu_info.path)
-			free(emu_info.path);
-		if (emu_info.nintendo_path)
-			free(emu_info.nintendo_path);
-	}
-	sd_unmount();
-	boot_storage_unmount();
-
-	if (error)
-		_create_mbox_ums_error(error);
-	else
-	{
-		usbs.type = MMC_SD;
-		usbs.partition = EMMC_BOOT0 + 1;
-		usbs.sectors = 0x2000; // Forced 4MB.
-		usbs.ro = usb_msc_emmc_read_only;
-		usbs.system_maintenance = &manual_system_maintenance;
-		usbs.set_text = &usb_gadget_set_text;
-		_create_mbox_ums(&usbs);
-	}
-
-	return LV_RES_OK;
+	return _ums_emummc(NYX_UMS_EMUMMC_BOOT0);
 }
 
 static lv_res_t _action_ums_emuemmc_boot1(lv_obj_t *btn)
 {
-	if (!nyx_emmc_check_battery_enough())
-		return LV_RES_OK;
-
-	usb_ctxt_t usbs;
-
-	int error = !sd_mount();
-	error &= boot_storage_mount();
-	if (!error)
-	{
-		emummc_cfg_t emu_info;
-		load_emummc_cfg(&emu_info);
-
-		error = 2;
-		if (emu_info.enabled)
-		{
-			error = 3;
-			if (emu_info.sector)
-			{
-				error = 0;
-				usbs.offset = emu_info.sector + 0x2000;
-			}
-		}
-
-		if (emu_info.path)
-			free(emu_info.path);
-		if (emu_info.nintendo_path)
-			free(emu_info.nintendo_path);
-	}
-	sd_unmount();
-	boot_storage_unmount();
-
-	if (error)
-		_create_mbox_ums_error(error);
-	else
-	{
-		usbs.type = MMC_SD;
-		usbs.partition = EMMC_BOOT1 + 1;
-		usbs.sectors = 0x2000; // Forced 4MB.
-		usbs.ro = usb_msc_emmc_read_only;
-		usbs.system_maintenance = &manual_system_maintenance;
-		usbs.set_text = &usb_gadget_set_text;
-		_create_mbox_ums(&usbs);
-	}
-
-	return LV_RES_OK;
+	return _ums_emummc(NYX_UMS_EMUMMC_BOOT1);
 }
 
 static lv_res_t _action_ums_emuemmc_gpp(lv_obj_t *btn)
 {
-	if (!nyx_emmc_check_battery_enough())
-		return LV_RES_OK;
-
-	usb_ctxt_t usbs;
-
-	int error = !sd_mount();
-	error &= boot_storage_mount();
-	if (!error)
-	{
-		emummc_cfg_t emu_info;
-		load_emummc_cfg(&emu_info);
-
-		error = 2;
-		if (emu_info.enabled)
-		{
-			error = 3;
-			if (emu_info.sector)
-			{
-				error = 1;
-				usbs.offset = emu_info.sector + 0x4000;
-
-				u8 *gpt = malloc(SD_BLOCKSIZE);
-				if (sdmmc_storage_read(&sd_storage, usbs.offset + 1, 1, gpt))
-				{
-					if (!memcmp(gpt, "EFI PART", 8))
-					{
-						error = 0;
-						usbs.sectors = *(u32 *)(gpt + 0x20) + 1; // Backup LBA + 1.
-					}
-				}
-			}
-		}
-
-		if (emu_info.path)
-			free(emu_info.path);
-		if (emu_info.nintendo_path)
-			free(emu_info.nintendo_path);
-	}
-	sd_unmount();
-	boot_storage_unmount();
-
-	if (error)
-		_create_mbox_ums_error(error);
-	else
-	{
-		usbs.type = MMC_SD;
-		usbs.partition = EMMC_GPP + 1;
-		usbs.ro = usb_msc_emmc_read_only;
-		usbs.system_maintenance = &manual_system_maintenance;
-		usbs.set_text = &usb_gadget_set_text;
-		_create_mbox_ums(&usbs);
-	}
-
-	return LV_RES_OK;
+	return _ums_emummc(NYX_UMS_EMUMMC_GPP);
 }
 
 void nyx_run_ums(void *param)

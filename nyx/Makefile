@@ -27,8 +27,8 @@ OBJS = $(addprefix $(BUILDDIR)/$(TARGET)/, \
 	start.o exception_handlers.o \
 	nyx.o heap.o \
 	gfx.o \
-	gui.o gui_info.o gui_tools.o gui_options.o gui_emmc_tools.o gui_emummc_tools.o gui_tools_partition_manager.o \
-	fe_emummc_tools.o fe_emmc_tools.o \
+	gui.o gui_info.o gui_tools.o gui_options.o gui_emmc_tools.o gui_emummc_tools.o gui_tools_partition_manager.o gui_emu_tools.o gui_emusd_tools.o \
+	fe_emummc_tools.o fe_emmc_tools.o fe_emusd_tools.o \
 )
 
 # Hardware.
@@ -41,7 +41,7 @@ OBJS += $(addprefix $(BUILDDIR)/$(TARGET)/, \
 	bm92t36.o bq24193.o max17050.o max7762x.o max77620-rtc.o regulator_5v.o \
 	touch.o joycon.o tmp451.o fan.o \
 	usbd.o xusbd.o usb_descriptors.o usb_gadget_ums.o usb_gadget_hid.o \
-	hw_init.o boot_storage.o sfd.o\
+	hw_init.o boot_storage.o sfd.o mbr_gpt.o \
 )
 
 # Utilities.

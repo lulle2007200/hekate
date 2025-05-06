@@ -19,6 +19,7 @@
 #include <bdk.h>
 
 #include "gui.h"
+#include "gui_emu_tools.h"
 #include "gui_emummc_tools.h"
 #include "gui_tools.h"
 #include "gui_info.h"
@@ -938,6 +939,9 @@ void reload_nyx()
 
 	void (*main_ptr)() = (void *)nyx_str->hekate;
 
+	// TODO: 
+	boot_storage_end();
+	emmc_end();
 	sd_end();
 
 	hw_deinit(false, 0);
@@ -982,7 +986,7 @@ static void _check_sd_card_removed(void *params)
 	// The following checks if SDMMC_1 is initialized.
 	// If yes and card was removed, shows a message box,
 	// that will reload Nyx, when the card is inserted again.
-	if (!do_reload && sd_get_card_removed())
+	if (!do_reload && sd_get_card_removed() && boot_storage_get_drive() == DRIVE_SD)
 	{
 		lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
 		lv_obj_set_style(dark_bg, &mbox_darken);
@@ -1004,7 +1008,7 @@ static void _check_sd_card_removed(void *params)
 	}
 
 	// If in reload state and card was inserted, reload nyx.
-	if (do_reload && !sd_get_card_removed())
+	if (do_reload && !sd_get_card_removed() && boot_storage_get_drive() == DRIVE_SD)
 		reload_nyx();
 }
 
@@ -2028,7 +2032,7 @@ static void _create_tab_home(lv_theme_t *th, lv_obj_t *parent)
 	label_btn = lv_label_create(btn_emummc, label_btn);
 	s_printf(btn_colored_text, "%s%s", text_color, " "SYMBOL_LIST"#");
 	lv_label_set_text(label_btn, btn_colored_text);
-	lv_btn_set_action(btn_emummc, LV_BTN_ACTION_CLICK, create_win_emummc_tools);
+	lv_btn_set_action(btn_emummc, LV_BTN_ACTION_CLICK, create_win_emu_tools);
 	lv_btn_set_layout(btn_emummc, LV_LAYOUT_OFF);
 	lv_obj_align(label_btn, NULL, LV_ALIGN_CENTER, 0, -28);
 	lv_obj_set_pos(btn_emummc, 959, 160);

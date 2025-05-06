@@ -19,6 +19,9 @@
 //! fix the dram stuff and the pop ups
 
 #include <storage/boot_storage.h>
+#include <storage/emmc.h>
+#include <storage/sd.h>
+#include <storage/sdmmc.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -77,7 +80,7 @@ void load_emummc_cfg(emummc_cfg_t *emu_info)
 	ini_free(&ini_sections);
 }
 
-void save_emummc_cfg(u32 part_idx, u32 sector_start, const char *path)
+void save_emummc_cfg(u32 part_idx, u32 sector_start, const char *path, u8 drive)
 {
 	boot_storage_mount();
 
@@ -89,14 +92,20 @@ void save_emummc_cfg(u32 part_idx, u32 sector_start, const char *path)
 
 	// Add config entry.
 	f_puts("[emummc]\nenabled=", &fp);
-	if (part_idx && sector_start)
+	if (part_idx && sector_start && drive == DRIVE_SD)
 	{
+		// 1: part. 1, 2: part. 2, 3: part. 3
 		itoa(part_idx, lbuf, 10);
 		f_puts(lbuf, &fp);
+	}else if(drive == DRIVE_EMMC && sector_start && part_idx){
+		// 4: emmc raw based
+		f_puts("4", &fp);
 	}
 	else if (path)
+		// 1: enabled, file based
 		f_puts("1", &fp);
 	else
+		// 0: disable
 		f_puts("0", &fp);
 
 	if (!sector_start)
@@ -115,8 +124,9 @@ void save_emummc_cfg(u32 part_idx, u32 sector_start, const char *path)
 
 	// Get ID from path.
 	u32 id_from_path = 0;
-	if (path && strlen(path) >= 4)
+	if (path && strlen(path) >= 4){
 		memcpy(&id_from_path, path + strlen(path) - 4, 4);
+	}
 	f_puts("\nid=0x", &fp);
 	itoa(id_from_path, lbuf, 16);
 	f_puts(lbuf, &fp);
@@ -490,11 +500,11 @@ out_failed:
 		strcpy(sdPath, gui->base_path);
 		strcat(sdPath, "file_based");
 		FIL fp;
-		f_open(&fp, sdPath, FA_CREATE_ALWAYS | FA_WRITE);
+		f_open(&fp, sdPath + 3, FA_CREATE_ALWAYS | FA_WRITE);
 		f_close(&fp);
 
 		gui->base_path[strlen(gui->base_path) - 1] = 0;
-		save_emummc_cfg(0, 0, gui->base_path);
+		save_emummc_cfg(0, 0, gui->base_path, 0);
 	}
 	else
 		s_printf(txt_buf, "Time taken: %dm %ds.", timer / 60, timer % 60);
@@ -507,7 +517,7 @@ out:
 	sd_unmount();
 }
 
-static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part_idx, u32 sd_part_off, emmc_part_t *part, u32 resized_count)
+static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part_idx, u32 sd_part_off, emmc_part_t *part, u32 resized_count, u8 drive)
 {
 	u32 num = 0;
 	u32 pct = 0;
@@ -516,6 +526,10 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 	u32 sd_sector_off = sd_part_off + (0x2000 * active_part);
 	u32 lba_curr = part->lba_start;
 	u8 *buf = (u8 *)MIXD_BUF_ALIGNED;
+
+	u32 cur_emmc_part = emmc_storage.partition;
+
+	sdmmc_storage_t *emu_storge = drive == DRIVE_SD ? &sd_storage : &emmc_storage;
 
 	s_printf(gui->txt_buf, "\n\n\n");
 	lv_label_ins_text(gui->label_info, LV_LABEL_POS_LAST, gui->txt_buf);
@@ -539,6 +553,7 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 	{
 		// Get USER partition info.
 		LIST_INIT(gpt_parsed);
+		// NOTE: reads from emummc, if enabled
 		emmc_gpt_parse(&gpt_parsed);
 		emmc_part_t *user_part = emmc_part_find(&gpt_parsed, "USER");
 		if (!user_part)
@@ -574,6 +589,9 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 		num = MIN(totalSectors, NUM_SECTORS_PER_ITER);
 
 		// Read data from eMMC.
+		if(emmc_storage.partition != cur_emmc_part){
+			emmc_set_partition(cur_emmc_part);
+		}
 		while (!sdmmc_storage_read(&emmc_storage, lba_curr, num, buf))
 		{
 			s_printf(gui->txt_buf,
@@ -604,12 +622,17 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 
 		// Write data to SD card.
 		retryCount = 0;
-		while (!sdmmc_storage_write(&sd_storage, sd_sector_off + lba_curr, num, buf))
+		if(drive == DRIVE_EMMC){
+			if(emmc_storage.partition != EMMC_GPP){
+				emmc_set_partition(EMMC_GPP);
+			}
+		}
+		while (!sdmmc_storage_write(emu_storge, sd_sector_off + lba_curr, num, buf))
 		{
 			s_printf(gui->txt_buf,
 				"\n#FFDD00 Error writing %d blocks @LBA %08X,#\n"
-				"#FFDD00 to SD (try %d). #",
-				num, lba_curr, ++retryCount);
+				"#FFDD00 to %s (try %d). #",
+				num, lba_curr, drive == DRIVE_SD ? "SD" : "eMMC", ++retryCount);
 			lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, gui->txt_buf);
 			manual_system_maintenance(true);
 
@@ -651,7 +674,7 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 	manual_system_maintenance(true);
 
 	// Set partition type to emuMMC (0xE0).
-	if (active_part == 2)
+	if (active_part == 2 && drive == DRIVE_SD)
 	{
 		mbr_t mbr;
 		sdmmc_storage_read(&sd_storage, 0, 1, &mbr);
@@ -673,7 +696,7 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 		user_part.lba_start = user_offset;
 		user_part.lba_end = user_offset + user_sectors - 1;
 		strcpy(user_part.name, "USER");
-		nx_emmc_bis_init(&user_part, true, &sd_storage, sd_sector_off);
+		nx_emmc_bis_init(&user_part, true, emu_storge, sd_sector_off);
 
 		s_printf(gui->txt_buf, "Formatting USER... \n");
 		lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, gui->txt_buf);
@@ -705,10 +728,20 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 		manual_system_maintenance(true);
 
 		// Read MBR, GPT and backup GPT.
-		mbr_t mbr;
+		mbr_t mbr = {0};
+		mbr.boot_signature = 0xaa55;
+		mbr.partitions[0].type = 0xee;
+		mbr.partitions[0].start_sct = 1;
+		mbr.partitions[0].start_sct_chs.sector = 0x02;
+		mbr.partitions[0].end_sct_chs.sector = 0xff;
+		mbr.partitions[0].end_sct_chs.cylinder = 0xff;
+		mbr.partitions[0].end_sct_chs.head = 0xff;
+		mbr.partitions[0].size_sct = 0xffffffff;
+
 		gpt_t *gpt = zalloc(sizeof(gpt_t));
 		gpt_header_t gpt_hdr_backup;
-		sdmmc_storage_read(&emmc_storage, 0, 1, &mbr);
+		// original mbr may have extra partition when emmc was partitioned before, just set signature and gpt protective entry
+		// sdmmc_storage_read(&emmc_storage, 0, 1, &mbr);
 		sdmmc_storage_read(&emmc_storage, 1, sizeof(gpt_t) >> 9, gpt);
 		sdmmc_storage_read(&emmc_storage, gpt->header.alt_lba, 1, &gpt_hdr_backup);
 
@@ -727,11 +760,15 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 			return 0;
 		}
 
+		// remove all partition entries past user
+		memset(&gpt->entries[gpt_entry_idx + 1], 0, sizeof(gpt->entries[0]) * (128 - (gpt_entry_idx + 1)));
+
 		// Set new emuMMC size and USER size.
 		mbr.partitions[0].size_sct = resized_count;
 		gpt->entries[gpt_entry_idx].lba_end = user_part.lba_end;
 
 		// Update Main GPT.
+		gpt->header.num_part_ents = gpt_entry_idx + 1;
 		gpt->header.alt_lba = resized_count - 1;
 		gpt->header.last_use_lba = resized_count - 34;
 		gpt->header.part_ents_crc32 = crc32_calc(0, (const u8 *)gpt->entries, sizeof(gpt_entry_t) * gpt->header.num_part_ents);
@@ -746,20 +783,20 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 		gpt_hdr_backup.crc32 = crc32_calc(0, (const u8 *)&gpt_hdr_backup, gpt_hdr_backup.size);
 
 		// Write main GPT.
-		sdmmc_storage_write(&sd_storage, sd_sector_off + gpt->header.my_lba, sizeof(gpt_t) >> 9, gpt);
+		sdmmc_storage_write(emu_storge, sd_sector_off + gpt->header.my_lba, sizeof(gpt_t) >> 9, gpt);
 
 		// Write backup GPT partition table.
-		sdmmc_storage_write(&sd_storage, sd_sector_off + gpt_hdr_backup.part_ent_lba, ((sizeof(gpt_entry_t) * 128) >> 9), gpt->entries);
+		sdmmc_storage_write(emu_storge, sd_sector_off + gpt_hdr_backup.part_ent_lba, ((sizeof(gpt_entry_t) * 128) >> 9), gpt->entries);
 
 		// Write backup GPT header.
-		sdmmc_storage_write(&sd_storage, sd_sector_off + gpt_hdr_backup.my_lba, 1, &gpt_hdr_backup);
+		sdmmc_storage_write(emu_storge, sd_sector_off + gpt_hdr_backup.my_lba, 1, &gpt_hdr_backup);
 
 		// Write MBR.
-		sdmmc_storage_write(&sd_storage, sd_sector_off, 1, &mbr);
+		sdmmc_storage_write(emu_storge, sd_sector_off, 1, &mbr);
 
 		// Clear nand patrol.
 		memset(buf, 0, EMMC_BLOCKSIZE);
-		sdmmc_storage_write(&sd_storage, sd_part_off + NAND_PATROL_SECTOR, 1, buf);
+		sdmmc_storage_write(emu_storge, sd_part_off + NAND_PATROL_SECTOR, 1, buf);
 
 		free(gpt);
 	}
@@ -786,6 +823,7 @@ static int _emummc_raw_derive_bis_keys(emmc_tool_gui_t *gui, u32 resized_count)
 	emmc_set_partition(EMMC_GPP);
 	LIST_INIT(gpt);
 	emmc_gpt_parse(&gpt);
+	// reads from emummc, if enabled
 	emmc_part_t *cal0_part = emmc_part_find(&gpt, "PRODINFO"); // check if null
 	nx_emmc_bis_init(cal0_part, false, NULL,  0);
 	nx_emmc_bis_read(0, 0x40, cal0_buff);
@@ -841,7 +879,7 @@ static int _emummc_raw_derive_bis_keys(emmc_tool_gui_t *gui, u32 resized_count)
 	return 1;
 }
 
-void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 resized_count)
+void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 resized_count, u8 drive)
 {
 	int res = 0;
 	u32 timer = 0;
@@ -855,10 +893,11 @@ void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 r
 
 	manual_system_maintenance(true);
 
-	// TODO: check result of boot storage mount
+	sdmmc_storage_t *emu_storage = drive == DRIVE_SD ? &sd_storage : &emmc_storage;
+
 	boot_storage_mount(); 
 
-	if (!sd_mount())
+	if (drive == DRIVE_SD && !sd_initialize(false))
 	{
 		lv_label_set_text(gui->label_info, "#FFDD00 Failed to init SD!#");
 		goto out;
@@ -880,9 +919,9 @@ void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 r
 
 	int i = 0;
 	char sdPath[OUT_FILENAME_SZ];
-	// Create Restore folders, if they do not exist.
-	f_mkdir("sd:emuMMC");
-	s_printf(sdPath, "sd:emuMMC/RAW%d", part_idx);
+	// Create folders, if they do not exist.
+	f_mkdir("emuMMC");
+	s_printf(sdPath, drive == DRIVE_SD ? "emuMMC/RAW%d" : "emuMMC/RAW_EMMC%d", part_idx);
 	f_mkdir(sdPath);
 	strcat(sdPath, "/");
 	strcpy(gui->base_path, sdPath);
@@ -897,7 +936,7 @@ void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 r
 
 	// Clear partition start.
 	memset((u8 *)MIXD_BUF_ALIGNED, 0, SZ_16M);
-	sdmmc_storage_write(&sd_storage, sector_start - 0x8000, 0x8000, (u8 *)MIXD_BUF_ALIGNED);
+	sdmmc_storage_write(emu_storage, sector_start - 0x8000, 0x8000, (u8 *)MIXD_BUF_ALIGNED);
 
 	for (i = 0; i < 2; i++)
 	{
@@ -915,7 +954,7 @@ void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 r
 		emmc_set_partition(i + 1);
 
 		strcat(sdPath, bootPart.name);
-		res = _dump_emummc_raw_part(gui, i, part_idx, sector_start, &bootPart, 0);
+		res = _dump_emummc_raw_part(gui, i, part_idx, sector_start, &bootPart, 0, drive);
 
 		if (!res)
 		{
@@ -949,7 +988,7 @@ void dump_emummc_raw(emmc_tool_gui_t *gui, int part_idx, u32 sector_start, u32 r
 		lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, txt_buf);
 		manual_system_maintenance(true);
 
-		res = _dump_emummc_raw_part(gui, 2, part_idx, sector_start, &rawPart, resized_count);
+		res = _dump_emummc_raw_part(gui, 2, part_idx, sector_start, &rawPart, resized_count, drive);
 
 		if (!res)
 			s_printf(txt_buf, "#FFDD00 Failed!#\n");
@@ -968,14 +1007,14 @@ out_failed:
 	{
 		s_printf(txt_buf, "Time taken: %dm %ds.\nFinished!", timer / 60, timer % 60);
 		strcpy(sdPath, gui->base_path);
-		strcat(sdPath, "raw_based");
+		strcat(sdPath, drive == DRIVE_SD ? "raw_based" : "raw_emmc_based");
 		FIL fp;
 		f_open(&fp, sdPath, FA_CREATE_ALWAYS | FA_WRITE);
 		f_write(&fp, &sector_start, 4, NULL);
 		f_close(&fp);
 
 		gui->base_path[strlen(gui->base_path) - 1] = 0;
-		save_emummc_cfg(part_idx, sector_start, gui->base_path);
+		save_emummc_cfg(part_idx, sector_start, gui->base_path, drive);
 	}
 	else
 		s_printf(txt_buf, "Time taken: %dm %ds.", timer / 60, timer % 60);
@@ -985,5 +1024,5 @@ out_failed:
 out:
 	free(txt_buf);
 	free(gui->base_path);
-	sd_unmount();
+	boot_storage_unmount();
 }

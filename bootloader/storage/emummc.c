@@ -14,6 +14,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <storage/emmc.h>
 #include <storage/sdmmc.h>
 #include <string.h>
 #include <stdlib.h>
@@ -85,30 +86,47 @@ bool emummc_set_path(char *path)
 
 	if (!f_open(&fp, emu_cfg.emummc_file_based_path, FA_READ))
 	{
-		if (!f_read(&fp, &emu_cfg.sector, 4, NULL))
-			if (emu_cfg.sector)
+		if (!f_read(&fp, &emu_cfg.sector, 4, NULL)){
+			if (emu_cfg.sector){
 				found = true;
-	}
-	else
-	{
-		// strcpy(emu_cfg.emummc_file_based_path, "sd:");
-		strcpy(emu_cfg.emummc_file_based_path, "");
-		strcat(emu_cfg.emummc_file_based_path, path);
-		strcat(emu_cfg.emummc_file_based_path, "/file_based");
-
-		if (!f_stat(emu_cfg.emummc_file_based_path, NULL))
-		{
-			emu_cfg.sector = 0;
-			emu_cfg.path = path;
-
-			found = true;
+				emu_cfg.enabled = 1;
+				goto out;
+			}
 		}
 	}
 
-	if (found)
+	strcpy(emu_cfg.emummc_file_based_path, "");
+	strcat(emu_cfg.emummc_file_based_path, path);
+	strcat(emu_cfg.emummc_file_based_path, "/raw_emmc_based");
+	if (!f_open(&fp, emu_cfg.emummc_file_based_path, FA_READ))
 	{
+		if (!f_read(&fp, &emu_cfg.sector, 4, NULL)){
+			if (emu_cfg.sector){
+				found = true;
+				emu_cfg.enabled = 4;
+				goto out;
+			}
+		}
+	}
+
+	// strcpy(emu_cfg.emummc_file_based_path, "sd:");
+	strcpy(emu_cfg.emummc_file_based_path, "");
+	strcat(emu_cfg.emummc_file_based_path, path);
+	strcat(emu_cfg.emummc_file_based_path, "/file_based");
+	if (!f_stat(emu_cfg.emummc_file_based_path, NULL))
+	{
+		emu_cfg.sector = 0;
+		emu_cfg.path = path;
 		emu_cfg.enabled = 1;
 
+		found = true;
+		goto out;
+	}
+
+out:
+
+	if (found)
+	{
 		// Get ID from path.
 		u32 id_from_path = 0;
 		u32 path_size = strlen(path);
@@ -149,7 +167,7 @@ int emummc_storage_init_mmc()
 	if (!emu_cfg.enabled || h_cfg.emummc_force_disable)
 		return 0;
 
-	if (!sd_mount())
+	if (emu_cfg.enabled == 1 && !sd_mount())
 		goto out;
 
 	if (!emu_cfg.sector)
@@ -182,7 +200,7 @@ out:
 
 int emummc_storage_end()
 {
-	if (!emu_cfg.enabled || h_cfg.emummc_force_disable)
+	if (!emu_cfg.enabled || h_cfg.emummc_force_disable || emu_cfg.enabled == 4)
 		emmc_end();
 	else
 		sd_end();
@@ -192,6 +210,7 @@ int emummc_storage_end()
 
 int emummc_storage_read(u32 sector, u32 num_sectors, void *buf)
 {
+	sdmmc_storage_t *storage = emu_cfg.enabled == 4 ? &emmc_storage : &sd_storage;
 	FIL fp;
 	if (!emu_cfg.enabled || h_cfg.emummc_force_disable)
 		return sdmmc_storage_read(&emmc_storage, sector, num_sectors, buf);
@@ -199,7 +218,7 @@ int emummc_storage_read(u32 sector, u32 num_sectors, void *buf)
 	{
 		sector += emu_cfg.sector;
 		sector += emummc_raw_get_part_off(emu_cfg.active_part) * 0x2000;
-		return sdmmc_storage_read(&sd_storage, sector, num_sectors, buf);
+		return sdmmc_storage_read(storage, sector, num_sectors, buf);
 	}
 	else
 	{
@@ -237,6 +256,7 @@ int emummc_storage_read(u32 sector, u32 num_sectors, void *buf)
 
 int emummc_storage_write(u32 sector, u32 num_sectors, void *buf)
 {
+	sdmmc_storage_t *storage = emu_cfg.enabled == 4 ? &emmc_storage : &sd_storage;
 	FIL fp;
 	if (!emu_cfg.enabled || h_cfg.emummc_force_disable)
 		return sdmmc_storage_write(&emmc_storage, sector, num_sectors, buf);
@@ -244,7 +264,7 @@ int emummc_storage_write(u32 sector, u32 num_sectors, void *buf)
 	{
 		sector += emu_cfg.sector;
 		sector += emummc_raw_get_part_off(emu_cfg.active_part) * 0x2000;
-		return sdmmc_storage_write(&sd_storage, sector, num_sectors, buf);
+		return sdmmc_storage_write(storage, sector, num_sectors, buf);
 	}
 	else
 	{
@@ -276,12 +296,15 @@ int emummc_storage_write(u32 sector, u32 num_sectors, void *buf)
 	}
 }
 
-
-// TODO: active partition may be changed by boot storage access
 int emummc_storage_set_mmc_partition(u32 partition)
 {
 	emu_cfg.active_part = partition;
-	emmc_set_partition(partition);
+
+	if(emu_cfg.enabled != 4){
+		emmc_set_partition(partition);
+	}else{
+		emmc_set_partition(EMMC_GPP);
+	}
 
 	if (!emu_cfg.enabled || h_cfg.emummc_force_disable || emu_cfg.sector)
 		return 1;
@@ -312,5 +335,5 @@ int emummc_storage_set_mmc_partition(u32 partition)
 
 sdmmc_storage_t *emummc_get_storage(){
 	// TODO: should return &emummc_storage if emummc lives on emmc
-	return &sd_storage;
+	return emu_cfg.enabled == 4 ? &emmc_storage : &sd_storage;
 }
