@@ -16,6 +16,7 @@
 
 #include <libs/lvgl/lv_core/lv_obj.h>
 #include <libs/lvgl/lv_objx/lv_btn.h>
+#include <libs/lvgl/lv_objx/lv_btnm.h>
 #include <libs/lvgl/lv_objx/lv_cont.h>
 #include <libs/lvgl/lv_objx/lv_mbox.h>
 #include <memory_map.h>
@@ -50,6 +51,7 @@ typedef struct _mbr_ctxt_t
 	u32 available;
 	u32 sector[3];
 	u32 resized_cnt[3];
+	u32 part_size[3];
 
 	int part_idx;
 	u32 sector_start;
@@ -64,6 +66,8 @@ typedef struct _gpt_ctxt_t
 	u8 emmc_part_cnt;
 } gpt_ctxt_t;
 
+
+static u32 emmc_safe_size;
 static bool emummc_backup;
 static mbr_ctxt_t mbr_ctx;
 static lv_obj_t *emummc_parent_cont;
@@ -187,34 +191,87 @@ static lv_res_t _create_emummc_raw_format(lv_obj_t * btns, const char * txt)
 	return LV_RES_INV;
 }
 
-static lv_res_t _create_emummc_raw_action(lv_obj_t * btns, const char * txt)
-{
-	int btn_idx = lv_btnm_get_pressed(btns);
-	lv_obj_t *bg = lv_obj_get_parent(lv_obj_get_parent(btns));
+static int idx_selected;
 
-	emummc_part_cfg.sector = 0x8000; // 16mb protective offset
+static void _create_emummc(u8 btn_idx){
+	emummc_part_cfg.sector = 0x8000; // Protective offset.
 
 	if(btn_idx < 3){
 		emummc_part_cfg.drive = DRIVE_SD;
 		emummc_part_cfg.part_idx = btn_idx + 1;
 		emummc_part_cfg.resized_cnt = mbr_ctx.resized_cnt[btn_idx];
 		emummc_part_cfg.sector += mbr_ctx.sector[btn_idx];
-		lv_obj_set_style(bg, &lv_style_transp);
 		_create_window_emummc();
 	}
 
 	memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+}
+
+static lv_res_t _ask_resize_action(lv_obj_t *btns, const char *txt){
+	int btn_idx = lv_btnm_get_pressed(btns);
+
+	switch(btn_idx){
+	case 0:
+		// Yes resize
+		mbr_ctx.resized_cnt[idx_selected] = mbr_ctx.part_size[idx_selected] - 0xc000;
+		_create_emummc(idx_selected);
+		break;
+	case 1:
+		// No resize
+		_create_emummc(idx_selected);
+		break;
+	case 2:
+		// cancel
+		memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+		break;
+	}
 
 	mbox_action(btns, txt);
 
 	return LV_RES_INV;
 }
 
-static lv_res_t _create_emummc_emmc_raw_action(lv_obj_t * btns, const char * txt)
-{
-	int btn_idx = lv_btnm_get_pressed(btns);
-	lv_obj_t *bg = lv_obj_get_parent(lv_obj_get_parent(btns));
+static void _create_mbox_ask_resize(){
+	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
+	lv_obj_set_style(dark_bg, &mbox_darken);
+	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
+	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
+	lv_mbox_set_recolor_text(mbox, true);
+	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 6);
+
+	static const char *mbox_btns[] = { "\222Yes", "\222No", "\222Cancel", "" };
+	lv_mbox_add_btns(mbox, mbox_btns, _ask_resize_action);
+
+	lv_mbox_set_text(mbox, "#C7EA46 Selected partition is larger than required!#\n"
+				           "Resize USER to use all available space?\n\n"
+				           "#FFDD00 Note:# This will format USER");
+
+	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+}
+
+static lv_res_t _create_emummc_raw_action(lv_obj_t * btns, const char * txt)
+{
+	idx_selected = lv_btnm_get_pressed(btns);
+
+	if(idx_selected < 3){
+		if(mbr_ctx.part_size[idx_selected] > emmc_safe_size + (0x8000 * 8)){
+			// partition larger than required for full emmc, ask to resize
+			_create_mbox_ask_resize();
+		}else{
+			_create_emummc(idx_selected);
+		}
+	}else{
+		// cancel
+		memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+	}
+
+	mbox_action(btns, txt);
+
+	return LV_RES_INV;
+}
+
+static void _create_emummc_emmc(u8 btn_idx){
 	emummc_part_cfg.sector = 0x8000; // Protective offset.
 
 	if(btn_idx < gpt_ctx.emmc_part_cnt){
@@ -222,11 +279,69 @@ static lv_res_t _create_emummc_emmc_raw_action(lv_obj_t * btns, const char * txt
 		emummc_part_cfg.drive = DRIVE_EMMC;
 		emummc_part_cfg.resized_cnt = gpt_ctx.emmc_part_resize_cnt[btn_idx];
 		emummc_part_cfg.sector += gpt_ctx.emmc_part_offset[btn_idx];
-		lv_obj_set_style(bg, &lv_style_transp);
 		_create_window_emummc();
 	}
 
 	memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+}
+
+static lv_res_t _ask_resize_action_emmc(lv_obj_t *btns, const char *txt){
+	int btn_idx = lv_btnm_get_pressed(btns);
+
+	switch(btn_idx){
+	case 0:
+		// Yes resize
+		gpt_ctx.emmc_part_resize_cnt[idx_selected] = gpt_ctx.emmc_part_size[idx_selected] - 0xc000;
+		_create_emummc_emmc(idx_selected);
+		break;
+	case 1:
+		// No resize
+		_create_emummc_emmc(idx_selected);
+		break;
+	case 2:
+		// cancel
+		memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+		break;
+	}
+
+	mbox_action(btns, txt);
+
+	return LV_RES_INV;
+}
+
+static void _create_mbox_ask_resize_emmc(){
+	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
+	lv_obj_set_style(dark_bg, &mbox_darken);
+	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
+
+	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
+	lv_mbox_set_recolor_text(mbox, true);
+	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 6);
+
+	static const char *mbox_btns[] = { "\222Yes", "\222No", "\222Cancel", "" };
+	lv_mbox_add_btns(mbox, mbox_btns, _ask_resize_action_emmc);
+
+	lv_mbox_set_text(mbox, "#C7EA46 Selected partition is larger than required!#\n"
+				           "Resize USER to use all available space?\n\n"
+				           "#FFDD00 Note:# This will format USER");
+
+	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+}
+
+static lv_res_t _create_emummc_emmc_raw_action(lv_obj_t *btns, const char *txt){
+	idx_selected = lv_btnm_get_pressed(btns);
+
+	if(idx_selected < gpt_ctx.emmc_part_cnt){
+		if(gpt_ctx.emmc_part_size[idx_selected] > emmc_safe_size + (0x8000 * 8)){
+			// partition larger than required for full emmc, ask to resize
+			_create_mbox_ask_resize_emmc();
+		}else{
+			_create_emummc_emmc(idx_selected);
+		}
+	}else{
+		// cancel
+		memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+	}
 
 	mbox_action(btns, txt);
 
@@ -272,7 +387,7 @@ static void _create_mbox_emummc_raw()
 
 	emmc_initialize(false);
 
-	u32 emmc_size_safe = emmc_storage.sec_cnt + 0xC000; // eMMC GPP size + BOOT0/1.
+	emmc_safe_size = 0xf00000;//emmc_storage.sec_cnt + 0xC000; // eMMC GPP size + BOOT0/1 + 16mb safety offset.
 
 	emmc_end();
 
@@ -290,12 +405,13 @@ static void _create_mbox_emummc_raw()
 		{
 			mbr_ctx.available |= BIT(i - 1);
 			mbr_ctx.sector[i - 1] = part_start;
+			mbr_ctx.part_size[i - 1] = part_size;
 
 			// *Why?* Only allow up to 16GB resized emuMMC.
 			// if (part_size < 0x2010000)
-			if (part_size < emmc_size_safe)
+			if (part_size < emmc_safe_size)
 				mbr_ctx.resized_cnt[i - 1] = part_size - 0xC000; // Save sectors count without protective size and BOOT0/1.
-			else if (part_size >= emmc_size_safe)
+			else if (part_size >= emmc_safe_size)
 				mbr_ctx.resized_cnt[i - 1] = 0;
 			else
 			{
@@ -381,12 +497,10 @@ static void _create_mbox_emummc_emmc_raw()
 	mbr_t *mbr = (mbr_t *)malloc(sizeof(mbr_t));
 	gpt_t *gpt = zalloc(sizeof *gpt);
 
-	u32 emmc_safe_size;
-
 	memset(&gpt_ctx, 0, sizeof(gpt_ctx));
 
 	emmc_mount();
-	emmc_safe_size = emmc_storage.sec_cnt + 0xc000;
+	emmc_safe_size = 0xf00000;//emmc_storage.sec_cnt + 0xc000;
 
 	sdmmc_storage_read(&emmc_storage, 0, 1, mbr);
 
@@ -429,7 +543,7 @@ static void _create_mbox_emummc_emmc_raw()
 		for(u32 i = 0; i < gpt_ctx.emmc_part_cnt; i++){
 			char name[36];
 			wctombs(gpt->entries[gpt_ctx.emmc_part_idx[i]].name, name, 36);
-			s_printf(txt_buf + strlen(txt_buf), "#%s Part. %d (%s): Start: 0x%x, Size. 0x%x#\n", gpt_ctx.emmc_part_resize_cnt[i] ? "FFDD00" : "C7EA46", gpt_ctx.emmc_part_idx[i], name, gpt_ctx.emmc_part_offset[i], gpt_ctx.emmc_part_size[i]);
+			s_printf(txt_buf + strlen(txt_buf), "#%s Part. %d (%s): Start: 0x%x, Size. 0x%x#\n", gpt_ctx.emmc_part_resize_cnt[i] ? "FFDD00" : "C0C0C0", gpt_ctx.emmc_part_idx[i], name, gpt_ctx.emmc_part_offset[i], gpt_ctx.emmc_part_size[i]);
 			s_printf(mbox_btn_parts[i], "\222Part. %d", gpt_ctx.emmc_part_idx[i]);
 		}
 		s_printf(mbox_btn_parts[gpt_ctx.emmc_part_cnt], "Cancel");
