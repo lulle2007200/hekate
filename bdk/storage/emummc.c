@@ -4,6 +4,8 @@
 #include <libs/fatfs/ff.h>
 #include <gfx_utils.h>
 
+// TODO: fast read/writes
+
 static FIL active_file;
 // -0xff: none, -1: boot 0, -2: boot1, 0+: gpp
 static s32 active_file_idx;

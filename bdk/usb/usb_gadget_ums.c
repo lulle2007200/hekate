@@ -1926,7 +1926,15 @@ int usb_device_gadget_ums(usb_ctxt_t *usbs)
 
 		ums.lun.sdmmc   = &emmc_sdmmc;
 		ums.lun.storage = &emmc_storage;
-	}else{
+	}else if(usbs->type == MMC_EMUMMC_FILE_EMMC){
+		if(!emmc_get_mounted()){
+			ums.set_text(ums.label, "#FFDD00 Failed to init eMMC!#");
+			res = 1;
+			goto init_fail;
+		}
+		ums.lun.storage = NULL;
+		ums.lun.sdmmc = NULL;
+	} else{
 		if (!emmc_initialize(false))
 		{
 			ums.set_text(ums.label, "#FFDD00 Failed to init eMMC!#");
@@ -1967,6 +1975,7 @@ int usb_device_gadget_ums(usb_ctxt_t *usbs)
 			ums.lun.num_sectors = ums.lun.storage->sec_cnt;
 			break;
 		case MMC_EMUMMC_FILE:
+		case MMC_EMUMMC_FILE_EMMC:
 		case MMC_EMUMMC_RAW_SD:
 		case MMC_EMUMMC_RAW_EMMC:
 			ums.set_text(ums.label, "#FFDD00 No sector count set for emuMMC!#");

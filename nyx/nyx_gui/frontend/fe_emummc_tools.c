@@ -18,6 +18,7 @@
 
 //! fix the dram stuff and the pop ups
 
+#include <fatfs_cfg.h>
 #include <libs/lvgl/lv_objx/lv_label.h>
 #include <mem/heap.h>
 #include <storage/boot_storage.h>
@@ -37,6 +38,7 @@
 #include "../config.h"
 #include <libs/fatfs/diskio.h>
 #include <libs/fatfs/ff.h>
+#include <utils/sprintf.h>
 
 #define OUT_FILENAME_SZ 128
 #define NAND_PATROL_SECTOR 0xC20
@@ -45,10 +47,14 @@
 extern hekate_config h_cfg;
 extern volatile boot_cfg_t *b_cfg;
 
-static int _emummc_resize_user(emmc_tool_gui_t *gui, u32 user_offset, u32 resized_cnt, sdmmc_storage_t *raw_based_storage, u32 raw_based_sector_offset, const char *file_based_path){
+static int _emummc_resize_user(emmc_tool_gui_t *gui, u32 user_offset, u32 resized_cnt, sdmmc_storage_t *raw_based_storage, u32 raw_based_sector_offset, const char *file_based_path, u8 drive){
 	bool file_based = file_based_path != NULL;
 
-	sd_mount();
+	if(drive == DRIVE_SD){
+		sd_mount();
+	}else{
+		emmc_mount();
+	}
 
 	s_printf(gui->txt_buf, "\nFormatting USER... ");
 	lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, gui->txt_buf);
@@ -248,11 +254,21 @@ void save_emummc_cfg(u32 part_idx, u32 sector_start, const char *path, u8 drive)
 	char lbuf[16];
 	FIL fp;
 
-	if (f_open(&fp, "emuMMC/emummc.ini", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+	int res = 0;
+
+	res = f_mkdir("emuMMC");
+	if(res != FR_OK && res != FR_EXIST){
 		return;
+	}
+
+	res = f_open(&fp, "emuMMC/emummc.ini", FA_WRITE | FA_CREATE_ALWAYS);
+	if (res != FR_OK){
+		return;
+	}
 
 	// Add config entry.
-	f_puts("[emummc]\nenabled=", &fp);
+	res = f_puts("[emummc]\nenabled=", &fp);
+	gfx_printf("puts %d\n", res);
 	if (part_idx && sector_start && drive == DRIVE_SD)
 	{
 		// 1: part. 1, 2: part. 2, 3: part. 3
@@ -262,10 +278,13 @@ void save_emummc_cfg(u32 part_idx, u32 sector_start, const char *path, u8 drive)
 		// 4: emmc raw based
 		f_puts("4", &fp);
 	}
-	else if (path)
+	else if (path && drive == DRIVE_SD)
 		// 1: enabled, file based
 		f_puts("1", &fp);
-	else
+	else if(path && drive == DRIVE_EMMC){
+		// 4: enabled, emmc file based
+		f_puts("4", &fp);
+	}else
 		// 0: disable
 		f_puts("0", &fp);
 
@@ -390,7 +409,7 @@ static int _emummc_raw_derive_bis_keys(emmc_tool_gui_t *gui, u32 resized_count)
 	return 1;
 }
 
-static int _dump_emummc_file_part(emmc_tool_gui_t *gui, char *sd_path, sdmmc_storage_t *storage, emmc_part_t *part, u32 resized_cnt)
+static int _dump_emummc_file_part(emmc_tool_gui_t *gui, char *sd_path, sdmmc_storage_t *storage, emmc_part_t *part, u32 resized_cnt, u8 drive)
 {
 	static const u32 FAT32_FILESIZE_LIMIT = 0xFFFFFFFF;
 	static const u32 SECTORS_TO_MIB_COEFF = 11;
@@ -403,10 +422,21 @@ static int _dump_emummc_file_part(emmc_tool_gui_t *gui, char *sd_path, sdmmc_sto
 	int res = 0;
 	char *outFilename = sd_path;
 	u32 sdPathLen = strlen(sd_path);
+	u32 free_space;
 
-	s_printf(gui->txt_buf, "#96FF00 SD Card free space:# %d MiB\n#96FF00 Total size:# %d MiB\n\n",
-		(u32)(sd_fs.free_clst * sd_fs.csize >> SECTORS_TO_MIB_COEFF),
-		sectors_left >> SECTORS_TO_MIB_COEFF);
+	FATFS *fs = drive == DRIVE_SD ? &sd_fs : &emmc_fs;
+	if(drive == DRIVE_SD){
+		free_space = (u32)(fs->free_clst * fs->csize >> SECTORS_TO_MIB_COEFF);
+		s_printf(gui->txt_buf, "#96FF00 SD Card free space:# %d MiB\n#96FF00 Total size:# %d MiB\n\n",
+			free_space,
+			sectors_left >> SECTORS_TO_MIB_COEFF);
+	}else{
+		free_space = (u32)(fs->free_clst * fs->csize >> SECTORS_TO_MIB_COEFF);
+		s_printf(gui->txt_buf, "#96FF00 eMMC free space:# %d MiB\n#96FF00 Total size:# %d MiB\n\n",
+			free_space,
+			sectors_left >> SECTORS_TO_MIB_COEFF);
+	}
+
 	lv_label_ins_text(gui->label_info, LV_LABEL_POS_LAST, gui->txt_buf);
 	manual_system_maintenance(true);
 
@@ -415,7 +445,7 @@ static int _dump_emummc_file_part(emmc_tool_gui_t *gui, char *sd_path, sdmmc_sto
 	manual_system_maintenance(true);
 
 	// Check if the USER partition or the RAW eMMC fits the sd card free space.
-	if (sectors_left > (sd_fs.free_clst * sd_fs.csize))
+	if (sectors_left > (fs->free_clst * fs->csize))
 	{
 		s_printf(gui->txt_buf, "\n#FFDD00 Not enough free space for file based emuMMC!#\n");
 		lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, gui->txt_buf);
@@ -587,7 +617,7 @@ static int _dump_emummc_file_part(emmc_tool_gui_t *gui, char *sd_path, sdmmc_sto
 
 			if (res)
 			{
-				s_printf(gui->txt_buf, "\n#FF0000 Fatal error (%d) when writing to SD Card#\nPlease try again...\n", res);
+				s_printf(gui->txt_buf, "\n#FF0000 Fatal error (%d) when writing to %s#\nPlease try again...\n", res, drive == DRIVE_SD ? "SD Card" : "eMMC");
 				lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, gui->txt_buf);
 				manual_system_maintenance(true);
 
@@ -642,14 +672,14 @@ static int _dump_emummc_file_part(emmc_tool_gui_t *gui, char *sd_path, sdmmc_sto
 		manual_system_maintenance(true);
 
 		sd_path[sdPathLen] = '\0';
-		if(_emummc_resize_user(gui, user_offset, resized_cnt, NULL, 0, sd_path) != FR_OK){
+		if(_emummc_resize_user(gui, user_offset, resized_cnt, NULL, 0, sd_path, drive) != FR_OK){
 			return 0;
 		}
 	}
 	return 1;
 }
 
-void dump_emummc_file(emmc_tool_gui_t *gui, u32 resized_cnt)
+void dump_emummc_file(emmc_tool_gui_t *gui, u32 resized_cnt, u8 drive)
 {
 	int res = 0;
 	int base_len = 0;
@@ -664,10 +694,20 @@ void dump_emummc_file(emmc_tool_gui_t *gui, u32 resized_cnt)
 
 	manual_system_maintenance(true);
 
-	if (!sd_mount())
-	{
-		lv_label_set_text(gui->label_info, "#FFDD00 Failed to init SD!#");
-		goto out;
+	boot_storage_mount();
+
+	if(drive == DRIVE_SD){
+		if (!sd_mount())
+		{
+			lv_label_set_text(gui->label_info, "#FFDD00 Failed to init SD!#");
+			goto out;
+		}
+	}else{
+		if (!emmc_mount())
+		{
+			lv_label_set_text(gui->label_info, "#FFDD00 Failed to init eMMC!#");
+			goto out;
+		}
 	}
 
 	lv_label_set_text(gui->label_info, "Checking for available free space...");
@@ -694,20 +734,31 @@ void dump_emummc_file(emmc_tool_gui_t *gui, u32 resized_cnt)
 	int i = 0;
 	char sdPath[OUT_FILENAME_SZ];
 	// Create Restore folders, if they do not exist.
-	f_mkdir("sd:emuMMC");
-	strcpy(sdPath, "sd:emuMMC/SD");
-	base_len = strlen(sdPath);
 
+	if(drive == DRIVE_SD){
+		strcpy(sdPath, "sd:emuMMC/SD");
+		f_mkdir("sd:emuMMC");
+	}else{
+		strcpy(sdPath, "emmc:emuMMC/EMMC");
+		f_mkdir("emmc:emuMMC");
+	}
+
+	//also create on boot storage
+	f_mkdir("emuMMC");
+
+	base_len = strlen(sdPath);
 	for (int j = 0; j < 100; j++)
 	{
 		update_emummc_base_folder(sdPath, base_len, j);
 		if (f_stat(sdPath, NULL) == FR_NO_FILE)
 			break;
 	}
-
 	f_mkdir(sdPath);
+	f_mkdir(sdPath + (drive == DRIVE_SD ? 3 : 5));
+
 	strcat(sdPath, "/eMMC");
 	f_mkdir(sdPath);
+
 	strcat(sdPath, "/");
 	strcpy(gui->base_path, sdPath);
 
@@ -735,7 +786,7 @@ void dump_emummc_file(emmc_tool_gui_t *gui, u32 resized_cnt)
 		emmc_set_partition(i + 1);
 
 		strcat(sdPath, bootPart.name);
-		res = _dump_emummc_file_part(gui, sdPath, &emmc_storage, &bootPart, 0);
+		res = _dump_emummc_file_part(gui, sdPath, &emmc_storage, &bootPart, 0, drive);
 
 		if (!res)
 		{
@@ -770,7 +821,7 @@ void dump_emummc_file(emmc_tool_gui_t *gui, u32 resized_cnt)
 	lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, txt_buf);
 	manual_system_maintenance(true);
 
-	res = _dump_emummc_file_part(gui, sdPath, &emmc_storage, &rawPart, resized_cnt);
+	res = _dump_emummc_file_part(gui, sdPath, &emmc_storage, &rawPart, resized_cnt, drive);
 
 	if (!res)
 		s_printf(txt_buf, "#FFDD00 Failed!#\n");
@@ -789,13 +840,17 @@ out_failed:
 		s_printf(txt_buf, "Time taken: %dm %ds.\nFinished!", timer / 60, timer % 60);
 		gui->base_path[strlen(gui->base_path) - 5] = '\0';
 		strcpy(sdPath, gui->base_path);
-		strcat(sdPath, "file_based");
+		if(drive == DRIVE_SD){
+			strcat(sdPath, "file_based");
+		}else{
+			strcat(sdPath, "file_emmc_based");
+		}
 		FIL fp;
-		f_open(&fp, sdPath + 3, FA_CREATE_ALWAYS | FA_WRITE);
+		f_open(&fp, sdPath + (drive == DRIVE_SD ? 3 : 5) /* strip drive prefix*/, FA_CREATE_ALWAYS | FA_WRITE);
 		f_close(&fp);
 
 		gui->base_path[strlen(gui->base_path) - 1] = 0;
-		save_emummc_cfg(0, 0, gui->base_path, 0);
+		save_emummc_cfg(0, 0, gui->base_path + (drive == DRIVE_SD ? 3 : 5), drive);
 	}
 	else
 		s_printf(txt_buf, "Time taken: %dm %ds.", timer / 60, timer % 60);
@@ -977,7 +1032,7 @@ static int _dump_emummc_raw_part(emmc_tool_gui_t *gui, int active_part, int part
 	{
 		lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, "Done!\n");
 
-		if(_emummc_resize_user(gui, user_offset, resized_count, emu_storge, sd_sector_off, NULL) != FR_OK){
+		if(_emummc_resize_user(gui, user_offset, resized_count, emu_storge, sd_sector_off, NULL, drive) != FR_OK){
 			return 0;
 		}
 	}

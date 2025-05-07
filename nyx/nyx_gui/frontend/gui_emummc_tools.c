@@ -20,6 +20,7 @@
 #include <libs/lvgl/lv_objx/lv_btnm.h>
 #include <libs/lvgl/lv_objx/lv_cont.h>
 #include <libs/lvgl/lv_objx/lv_label.h>
+#include <libs/lvgl/lv_objx/lv_list.h>
 #include <libs/lvgl/lv_objx/lv_mbox.h>
 #include <libs/lvgl/lv_objx/lv_slider.h>
 #include <memory_map.h>
@@ -171,7 +172,7 @@ static void _create_window_emummc()
 	emmc_tool_gui_ctxt.label_finish = label_finish;
 
 	if (emummc_part_cfg.file_based)
-		dump_emummc_file(&emmc_tool_gui_ctxt, emummc_part_cfg.resized_cnt);
+		dump_emummc_file(&emmc_tool_gui_ctxt, emummc_part_cfg.resized_cnt, emummc_part_cfg.drive);
 	else
 		dump_emummc_raw(&emmc_tool_gui_ctxt, emummc_part_cfg.part_idx, emummc_part_cfg.sector, emummc_part_cfg.resized_cnt, emummc_part_cfg.drive);
 
@@ -625,6 +626,8 @@ static lv_res_t _create_emummc_file_based_action(lv_obj_t *btns, const char *txt
 }
 
 static void _create_mbox_emummc_file_based(){
+	char *txt_buf = malloc(SZ_4K);
+
 	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
 	lv_obj_set_style(dark_bg, &mbox_darken);
 	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
@@ -645,27 +648,39 @@ static void _create_mbox_emummc_file_based(){
 
 	gfx_printf("full: 0x%x\n", emmc_storage.sec_cnt);
 
-	char txt_buf[0x20];
-
-	sd_mount();
+	FATFS *fs;
+	if(emummc_part_cfg.drive == DRIVE_SD){
+		sd_mount();
+		fs = &sd_fs;
+		f_getfree("sd:", &fs->free_clst, NULL);
+	}else{
+		emmc_mount();
+		fs = &emmc_fs;
+		f_getfree("emmc:", &fs->free_clst, NULL);
+	}
 	emmc_initialize(false);
-	f_getfree("sd:", &sd_fs.free_clst, NULL);
-	sd_unmount();
+	if(emummc_part_cfg.drive == DRIVE_SD){
+		sd_unmount();
+	}else{
+		emmc_unmount();
+	}
 
 
 
 	// leave 1gb free
-	u32 available = sd_fs.free_clst * sd_fs.csize;
+	u32 available = fs->free_clst * fs->csize;
 	available >>= 11;
 	available = available > (5 * 1024) ? available - (1 * 1024) : 0;
 
 	if(available == 0){
-		lv_mbox_set_text(mbox, "#C7EA46 Select emuMMC size!#\n\n"
-					           "#FFDD00 Note:# Not enough free space on SD");
+		s_printf(txt_buf, "#C7EA46 Select emuMMC size!#\n\n"
+					      "#FFDD00 Note:# Not enough free space on %s", emummc_part_cfg.drive == DRIVE_SD ? "SD" : "eMMC");
+		lv_mbox_set_text(mbox, txt_buf);
 
 	}else if(value_full > available){
-		lv_mbox_set_text(mbox, "#C7EA46 Select emuMMC size!#\n\n"
-					           "#FFDD00 Note:# Not enough space for full eMMC, \nUSER will be resized and formatted");
+		s_printf(txt_buf, "#C7EA46 Select emuMMC size!#\n\n"
+					      "#FFDD00 Note:# Not enough space on %s for for full eMMC, \nUSER will be resized and formatted", emummc_part_cfg.drive == DRIVE_SD ? "SD" : "eMMC");
+		lv_mbox_set_text(mbox, txt_buf);
 	}else{
 		lv_mbox_set_text(mbox, "#C7EA46 Select emuMMC size!#\n\n"
 					           "#FFDD00 Note:# Any value other than \"FULL\" will format USER");
@@ -725,34 +740,109 @@ static void _create_mbox_emummc_file_based(){
 		lv_mbox_add_btns(mbox, mbox_btns_ok, _create_emummc_file_based_action);
 	}
 
-
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	emummc_part_cfg.file_based = true;
 }
 
-static lv_res_t _create_emummc_action(lv_obj_t * btns, const char * txt)
-{
+static lv_res_t _create_emummc_select_file_type_action(lv_obj_t *btns, const char *txt){
 	int btn_idx = lv_btnm_get_pressed(btns);
-	// lv_obj_t *bg = lv_obj_get_parent(lv_obj_get_parent(btns));
 
-	memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
-	
 	mbox_action(btns, txt);
 
-	switch (btn_idx)
-	{
+	memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+
+	switch(btn_idx){
 	case 0:
-		// lv_obj_set_style(bg, &lv_style_transp);
+		emummc_part_cfg.drive = DRIVE_SD;
 		_create_mbox_emummc_file_based();
 		break;
 	case 1:
-		_create_mbox_emummc_raw();
+		emummc_part_cfg.drive = DRIVE_EMMC;
+		_create_mbox_emummc_file_based();		
 		break;
 	case 2:
-		_create_mbox_emummc_emmc_raw();
 		break;
 	}
 
+	return LV_RES_INV;
+}
+
+static lv_res_t _create_emummc_select_raw_type_action(lv_obj_t *btns, const char *txt){
+	int btn_idx = lv_btnm_get_pressed(btns);
+
+	mbox_action(btns, txt);
+
+	memset(&emummc_part_cfg, 0, sizeof(emummc_part_cfg));
+
+	switch(btn_idx){
+	case 0:
+		_create_mbox_emummc_raw();
+		break;
+	case 1:
+		_create_mbox_emummc_emmc_raw();
+		break;
+	case 2:
+		break;
+	}
+
+	return LV_RES_INV;
+}
+
+static void _create_mbox_emummc_select_raw_type(){
+	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
+	lv_obj_set_style(dark_bg, &mbox_darken);
+	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
+
+	static const char * mbox_btn_map[] = { "\222SD partition", "\222eMMC partition", "\222Cancel", "" };
+	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
+	lv_mbox_set_recolor_text(mbox, true);
+	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 6);
+
+	lv_mbox_set_text(mbox,
+		"Welcome to #C7EA46 emuMMC# creation tool!\n\n"
+		"Please choose what type of partition based emuMMC to create.");
+
+	lv_mbox_add_btns(mbox, mbox_btn_map, _create_emummc_select_raw_type_action);
+
+	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+	lv_obj_set_top(mbox, true);
+}
+
+static void _create_mbox_emummc_select_file_type(){
+	lv_obj_t *dark_bg = lv_obj_create(lv_scr_act(), NULL);
+	lv_obj_set_style(dark_bg, &mbox_darken);
+	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
+
+	static const char * mbox_btn_map[] = { "\222SD file", "\222eMMC file", "\222Cancel", "" };
+	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
+	lv_mbox_set_recolor_text(mbox, true);
+	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 6);
+
+	lv_mbox_set_text(mbox,
+		"Welcome to #C7EA46 emuMMC# creation tool!\n\n"
+		"Please choose what type of file based emuMMC to create.");
+
+	lv_mbox_add_btns(mbox, mbox_btn_map, _create_emummc_select_file_type_action);
+
+	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
+	lv_obj_set_top(mbox, true);
+}
+
+static lv_res_t _create_emummc_select_type_action(lv_obj_t *btns, const char *txt){
+	int btn_idx = lv_btnm_get_pressed(btns);
+
+	mbox_action(btns, txt);
+
+	switch(btn_idx){
+	case 0:
+		_create_mbox_emummc_select_file_type();
+		break;
+	case 1:
+		_create_mbox_emummc_select_raw_type();
+		break;
+	case 2:
+		break;
+	}
 
 	return LV_RES_INV;
 }
@@ -766,7 +856,7 @@ static lv_res_t _create_mbox_emummc_create(lv_obj_t *btn)
 	lv_obj_set_style(dark_bg, &mbox_darken);
 	lv_obj_set_size(dark_bg, LV_HOR_RES, LV_VER_RES);
 
-	static const char * mbox_btn_map[] = { "\222SD File", "\222SD Partition", "\222eMMC Partition", "\222Cancel", "" };
+	static const char * mbox_btn_map[] = { "\222File based", "\222Partition Based", "\222Cancel", "" };
 	lv_obj_t * mbox = lv_mbox_create(dark_bg, NULL);
 	lv_mbox_set_recolor_text(mbox, true);
 	lv_obj_set_width(mbox, LV_HOR_RES / 9 * 6);
@@ -774,10 +864,10 @@ static lv_res_t _create_mbox_emummc_create(lv_obj_t *btn)
 	lv_mbox_set_text(mbox,
 		"Welcome to #C7EA46 emuMMC# creation tool!\n\n"
 		"Please choose what type of emuMMC you want to create.\n"
-		"#FF8000 SD File# is saved as files in the SD FAT partition.\n"
-		"#FF8000 SD# and #FF8000 eMMC Partition# is saved as raw image in an available partition.");
+		"#FF8000 File based# is saved as files in\nthe SD or eMMC FAT partition.\n"
+		"#FF8000 Partition based# is saved as raw image in a\navailable SD or eMMC partition.");
 
-	lv_mbox_add_btns(mbox, mbox_btn_map, _create_emummc_action);
+	lv_mbox_add_btns(mbox, mbox_btn_map, _create_emummc_select_type_action);
 
 	lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_top(mbox, true);
@@ -1496,13 +1586,28 @@ static lv_res_t _save_disable_emummc_cfg_action(lv_obj_t * btn)
 	save_emummc_cfg(0, 0, NULL, 0);
 	_create_emummc_saved_mbox();
 	sd_unmount();
+	boot_storage_unmount();
+
+	return LV_RES_INV;
+}
+
+static lv_res_t _save_file_emummc_emmc_cfg_action(lv_obj_t *btn)
+{
+	const char *btn_txt = lv_list_get_btn_text(btn);
+	gfx_printf("save emu %s\n", btn_txt);
+	save_emummc_cfg(0, 0, btn_txt, DRIVE_EMMC);
+	_create_emummc_saved_mbox();
+	sd_unmount();
+	boot_storage_unmount();
 
 	return LV_RES_INV;
 }
 
 static lv_res_t _save_file_emummc_cfg_action(lv_obj_t *btn)
 {
-	save_emummc_cfg(0, 0, lv_list_get_btn_text(btn), 0);
+	const char *btn_txt = lv_list_get_btn_text(btn);
+	gfx_printf("save sd %s\n", btn_txt);
+	save_emummc_cfg(0, 0, btn_txt, DRIVE_SD);
 	_create_emummc_saved_mbox();
 	sd_unmount();
 	boot_storage_unmount();
@@ -1632,6 +1737,7 @@ static lv_res_t _create_change_emummc_window(lv_obj_t *btn_caller)
 	u32 file_based_idx = 0;
 
 	// Sanitize the directory list with sd file based ones.
+	u8 file_based_drives[DIR_MAX_ENTRIES];
 	while (emummc_img->dirlist->name[emummc_idx])
 	{
 		s_printf(path, "emuMMC/%s/file_based", emummc_img->dirlist->name[emummc_idx]);
@@ -1640,6 +1746,16 @@ static lv_res_t _create_change_emummc_window(lv_obj_t *btn_caller)
 		{
 			char *tmp = emummc_img->dirlist->name[emummc_idx];
 			memcpy(emummc_img->dirlist->name[file_based_idx], tmp, strlen(tmp) + 1);
+			file_based_drives[file_based_idx] = DRIVE_SD;
+			file_based_idx++;
+		}
+
+		s_printf(path, "emuMMC/%s/file_emmc_based", emummc_img->dirlist->name[emummc_idx]);
+		if (!f_stat(path, NULL))
+		{
+			char *tmp = emummc_img->dirlist->name[emummc_idx];
+			memcpy(emummc_img->dirlist->name[file_based_idx], tmp, strlen(tmp) + 1);
+			file_based_drives[file_based_idx] = DRIVE_EMMC;
 			file_based_idx++;
 		}
 		emummc_idx++;
@@ -1803,7 +1919,7 @@ out0:;
 	lv_label_set_static_text(label_sep, "");
 
 	lv_obj_t *label_txt3 = lv_label_create(h2, NULL);
-	lv_label_set_static_text(label_txt3, "SD File Based");
+	lv_label_set_static_text(label_txt3, "SD/eMMC File Based");
 	lv_obj_set_style(label_txt3, lv_theme_get_current()->label.prim);
 	lv_obj_align(label_txt3, label_sep, LV_ALIGN_OUT_BOTTOM_LEFT, LV_DPI * 2 / 9, -LV_DPI / 7);
 
@@ -1827,7 +1943,11 @@ out0:;
 	{
 		s_printf(path, "emuMMC/%s", emummc_img->dirlist->name[emummc_idx]);
 
-		lv_list_add(list_sd_based, NULL, path, _save_file_emummc_cfg_action);
+		if(file_based_drives[emummc_idx] == DRIVE_SD){
+			lv_list_add(list_sd_based, NULL, path, _save_file_emummc_cfg_action);
+		}else{
+			lv_list_add(list_sd_based, NULL, path, _save_file_emummc_emmc_cfg_action);
+		}
 
 		emummc_idx++;
 	}

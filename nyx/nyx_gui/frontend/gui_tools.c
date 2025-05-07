@@ -615,7 +615,7 @@ static lv_res_t _ums_emummc(u32 part){
 		load_emummc_cfg(&emu_info);
 		if(emu_info.enabled){
 			error = 0;
-			if(emu_info.enabled == 4){
+			if(emu_info.enabled == 4 && emu_info.sector){
 				// emmc raw based
 				if(!emmc_initialize(false)){
 					error = 3;
@@ -627,13 +627,25 @@ static lv_res_t _ums_emummc(u32 part){
 					error = 4;
 				}
 				storage = &sd_storage;
-			}else if(emu_info.enabled == 1 && !emu_info.sector){
+			}else if((emu_info.enabled == 1 || emu_info.enabled == 4) && !emu_info.sector){
 				// sd file based
-				if(!sd_mount()){
-					error = 4;
+				if(emu_info.enabled == 1){
+					if(!sd_mount()){
+						error = 4;
+					}
 				}else{
+					if(!emmc_mount()){
+						error = 3;
+					}
+				}
+				if(error == 0){
 					file_based = true;
-					strcpy(path, emu_info.path);
+					if(emu_info.enabled == 1){
+						strcpy(path, "sd:");
+					}else{
+						strcpy(path, "emmc:");
+					}
+					strcat(path, emu_info.path);
 					strcat(path, "/eMMC/");
 					if(!emummc_storage_file_based_init(path)){
 						error = 8;
@@ -651,12 +663,14 @@ static lv_res_t _ums_emummc(u32 part){
 						}
 					}
 				}
+			}else{
+				error = 2;
 			}
 		}else{
 			error = 2;
 		}
 
-		if(error == 0 && emu_info.enabled == 1){
+		if(error == 0 && emu_info.enabled){
 			error = 6;
 			if(file_based){
 				usbs.offset = 0;
@@ -713,7 +727,7 @@ static lv_res_t _ums_emummc(u32 part){
 		_create_mbox_ums_error(error);
 	}else{
 		if(file_based){
-			usbs.type = MMC_EMUMMC_FILE;
+			usbs.type = emu_info.enabled == 4 ? MMC_EMUMMC_FILE_EMMC : MMC_EMUMMC_FILE;
 		}else{
 			usbs.type = emu_info.enabled == 4 ? MMC_EMUMMC_RAW_EMMC : MMC_EMUMMC_RAW_SD;
 		}
