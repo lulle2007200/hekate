@@ -2013,14 +2013,22 @@ lv_res_t create_tab_emummc_tools(lv_obj_t *parent)
 	if (emu_info.enabled)
 	{
 		if(emu_info.enabled == 4){
-			s_printf(txt_buf, "#00DDFF Type:# eMMC Raw Partition\n#00DDFF Sector:# 0x%08X\n#00DDFF Nintendo folder:# %s",
-				emu_info.sector, emu_info.nintendo_path ? emu_info.nintendo_path : "");
-		}else if (emu_info.sector)
-			s_printf(txt_buf, "#00DDFF Type:# SD Raw Partition\n#00DDFF Sector:# 0x%08X\n#00DDFF Nintendo folder:# %s",
-				emu_info.sector, emu_info.nintendo_path ? emu_info.nintendo_path : "");
-		else
-			s_printf(txt_buf, "#00DDFF Type:# SD File\n#00DDFF Base folder:# %s\n#00DDFF Nintendo folder:# %s",
-				emu_info.path ? emu_info.path : "", emu_info.nintendo_path ? emu_info.nintendo_path : "");
+			if(emu_info.sector){
+				s_printf(txt_buf, "#00DDFF Type:# eMMC Raw Partition\n#00DDFF Sector:# 0x%08X\n#00DDFF Nintendo folder:# %s",
+					emu_info.sector, emu_info.nintendo_path ? emu_info.nintendo_path : "");
+			}else{
+				s_printf(txt_buf, "#00DDFF Type:# eMMC File\n#00DDFF Base folder:# %s\n#00DDFF Nintendo folder:# %s",
+					emu_info.path ? emu_info.path : "", emu_info.nintendo_path ? emu_info.nintendo_path : "");
+			}
+		}else{
+			if (emu_info.sector){
+				s_printf(txt_buf, "#00DDFF Type:# SD Raw Partition\n#00DDFF Sector:# 0x%08X\n#00DDFF Nintendo folder:# %s",
+					     emu_info.sector, emu_info.nintendo_path ? emu_info.nintendo_path : "");
+			}else{
+				s_printf(txt_buf, "#00DDFF Type:# SD File\n#00DDFF Base folder:# %s\n#00DDFF Nintendo folder:# %s",
+					emu_info.path ? emu_info.path : "", emu_info.nintendo_path ? emu_info.nintendo_path : "");
+			}
+		}
 
 		lv_label_set_text(label_txt2, txt_buf);
 	}
