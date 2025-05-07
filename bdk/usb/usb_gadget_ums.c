@@ -663,7 +663,7 @@ static int _scsi_write(usbd_gadget_ums_t *ums, bulk_ctxt_t *bulk_ctxt)
 					amount >> UMS_DISK_LBA_SHIFT, (u8 *)bulk_ctxt->bulk_out_buf))
 					amount = 0;
 			}else{
-				if(!emummc_storage_file_based_read(ums->lun.offset + lba_offset, amount >> UMS_DISK_LBA_SHIFT, (u8*)bulk_ctxt->bulk_out_buf)){
+				if(!emummc_storage_file_based_write(ums->lun.offset + lba_offset, amount >> UMS_DISK_LBA_SHIFT, (u8*)bulk_ctxt->bulk_out_buf)){
 					amount = 0;
 				}
 			}
