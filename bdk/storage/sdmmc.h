@@ -29,8 +29,11 @@ extern u32 sd_power_cycle_time_start;
 
 typedef enum _sdmmc_type
 {
-	MMC_SD   = 0,
-	MMC_EMMC = 1,
+	MMC_SD              = 0,
+	MMC_EMMC            = 1,
+	MMC_EMUMMC_FILE     = 2,
+	MMC_EMUMMC_RAW_SD   = 3,
+	MMC_EMUMMC_RAW_EMMC = 4,
 
 	EMMC_GPP   = 0,
 	EMMC_BOOT0 = 1,
