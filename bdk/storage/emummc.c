@@ -15,7 +15,7 @@ static u32 file_based_base_path_len;
 static int _emummc_storage_file_based_read_write_single(u32 sector, u32 num_sectors, void *buf, bool is_write){
 	#if FF_FS_READONLY == 1
 	if(is_write){
-		return 0;
+		return FR_WRITE_PROTECTED;
 	}
 	#endif
 
@@ -51,7 +51,6 @@ static int _emummc_storage_file_based_change_file(const char *name, s32 idx){
 
 	strcpy(file_based_base_path + file_based_base_path_len, name);
 
-	gfx_printf("new f %s  \n", file_based_base_path);
 
 	#if FF_FS_READONLY == 1
 	res = f_open(&active_file, file_based_base_path, FA_READ);
@@ -86,21 +85,30 @@ static int _emummc_storage_file_based_read_write(u32 sector, u32 num_sectors, vo
 		if(res != FR_OK){
 			return 0;
 		}
-		return _emummc_storage_file_based_read_write_single(sector, num_sectors, buf, is_write) == FR_OK;
+		res = _emummc_storage_file_based_read_write_single(sector, num_sectors, buf, is_write);
+		if(res != FR_OK){
+			return 0;
+		}
+		f_sync(&active_file);
+		return 1;
 	}else if(active_part == 2){
 		// boot1
 		res = _emummc_storage_file_based_change_file("BOOT1", -2);
 		if(res != FR_OK){
 			return 0;
 		}
-		return _emummc_storage_file_based_read_write_single(sector, num_sectors, buf, is_write) == FR_OK;
+		res = _emummc_storage_file_based_read_write_single(sector, num_sectors, buf, is_write) == FR_OK;
+		if(res != FR_OK){
+			return 0;
+		}
+		f_sync(&active_file);
+		return 1;
 	}else if(active_part == 0){
 		// GPP
 		if(file_part_sz_sct == 0){
 			return 0;
 		}
 
-		gfx_printf("emu w %x %x  \n", sector, num_sectors);
 
 		u32 scts_left = num_sectors;
 		u32 cur_sct = sector;
@@ -113,20 +121,16 @@ static int _emummc_storage_file_based_read_write(u32 sector, u32 num_sectors, vo
 
 			u32 file_idx = cur_sct / file_part_sz_sct;
 
-			gfx_printf("idx %d cnt %x off %x  \n", file_idx, sct_cnt, offset);
 			if((s32)file_idx != active_file_idx){
-				gfx_printf("active idx %d  \n", active_file_idx);
 				char name[3] = "";
 				if(file_idx < 10){
 					strcpy(name, "0");
 				}
 				itoa(file_idx, name + strlen(name), 10);
 
-				gfx_printf("new name %s  \n", name);
 
 				res = _emummc_storage_file_based_change_file(name, file_idx);
 				if(res != FR_OK){
-					gfx_printf("fail change file  \n");
 					return 0;
 				}
 			}
@@ -134,13 +138,16 @@ static int _emummc_storage_file_based_read_write(u32 sector, u32 num_sectors, vo
 			res = _emummc_storage_file_based_read_write_single(offset, sct_cnt, buf + ((u64)(num_sectors - scts_left) << 9), is_write);
 
 			if(res != FR_OK){
-				gfx_printf("rw single fail %d  \n", res);
 				return 0;
 			}
 
 			cur_sct += sct_cnt;
 			scts_left -= sct_cnt;
 		}
+		if(res != FR_OK){
+			return 0;
+		}
+		f_sync(&active_file);
 		return 1;
 	}
 	return 0;
@@ -152,7 +159,6 @@ int emummc_storage_file_base_set_partition(u32 partition){
 }
 
 int emummc_storage_file_based_init(const char *path){
-	gfx_printf("emu init %s  \n", path);
 	strcpy(file_based_base_path, path);
 	file_based_base_path_len = strlen(file_based_base_path);
 	strcat(file_based_base_path + file_based_base_path_len, "00");
@@ -161,7 +167,6 @@ int emummc_storage_file_based_init(const char *path){
 
 	FILINFO fi;
 	if(f_stat(file_based_base_path, &fi) != FR_OK){
-		gfx_printf("emu init fstat failed %s  \n", path);
 		return 0;
 	}
 
