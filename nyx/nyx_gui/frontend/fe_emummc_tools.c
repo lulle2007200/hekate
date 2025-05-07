@@ -83,8 +83,6 @@ static int _emummc_resize_user(emmc_tool_gui_t *gui, u32 user_offset, u32 resize
 		return res;
 	}
 
-	gfx_printf("---------------\n");
-
 	s_printf(gui->txt_buf, "Done!\nWriting new GPT... ");
 	lv_label_ins_text(gui->label_log, LV_LABEL_POS_LAST, gui->txt_buf);
 	manual_system_maintenance(true);
