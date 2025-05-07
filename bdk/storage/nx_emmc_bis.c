@@ -17,6 +17,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <libs/fatfs/ff.h>
+#include <stdlib.h>
+#include <storage/nx_emmc_bis.h>
 #include <string.h>
 
 #include <memory_map.h>
@@ -57,6 +60,72 @@ static emmc_part_t *system_part = NULL;
 static u32 *cache_lookup_tbl = (u32 *)NX_BIS_LOOKUP_ADDR;
 static bis_cache_t *bis_cache = (bis_cache_t *)NX_BIS_CACHE_ADDR;
 static sdmmc_storage_t *emu_storage = NULL;
+static bool file_based = false;
+static char file_based_path[0x80];
+static u32 file_based_part_sz = 0;
+static s32 active_file_idx = -1;
+static FIL cur_file;
+
+static int file_based_read_write(u32 sector, u32 num_sectors, void *buf, bool is_write)
+{
+	if(file_based_part_sz == 0){
+		return 0;
+	}
+
+	int res;
+	u32 scts_left = num_sectors;
+	u32 cur_sct = sector;
+
+	while(scts_left){
+		// offset within file
+		u32 offset = cur_sct % file_based_part_sz;
+		// read up to start of next file or sectors left, whatever is less
+		u32 sct_cnt = file_based_part_sz - offset;
+		sct_cnt = MIN(sct_cnt, scts_left);
+
+		u32 file_idx = cur_sct / file_based_part_sz;
+
+		if(file_idx != active_file_idx){
+			if(active_file_idx != -1){
+				f_close(&cur_file);
+			}
+
+			if(file_idx < 10){
+				file_based_path[strlen(file_based_path) - 2] = '0';
+				itoa(file_idx, file_based_path + strlen(file_based_path) - 1, 10);
+			}else{
+				itoa(file_idx, file_based_path + strlen(file_based_path) - 2, 10);
+			}
+
+			res = f_open(&cur_file, file_based_path, is_write ? FA_WRITE : FA_READ);
+			if(res != FR_OK){
+				return 0;
+			}
+			active_file_idx = file_idx;
+		}
+
+		int res;
+		res = f_lseek(&cur_file, (u64)offset << 9);
+		if(res != FR_OK){
+			return 0;
+		}
+
+		if(is_write){
+			res = f_write(&cur_file, buf + ((u64)(num_sectors - scts_left) << 9), sct_cnt << 9, NULL);
+		}else{
+			res = f_read(&cur_file, buf + ((u64)(num_sectors - scts_left) << 9), sct_cnt << 9, NULL);
+		}
+
+		if(res != FR_OK){
+			return 0;
+		}
+
+		cur_sct += sct_cnt;
+		scts_left -= sct_cnt;
+	}
+
+	return 1;
+}
 
 static int nx_emmc_bis_write_block(u32 sector, u32 count, void *buff, bool flush)
 {
@@ -96,10 +165,14 @@ static int nx_emmc_bis_write_block(u32 sector, u32 count, void *buff, bool flush
 		return 1; // Encryption error.
 
 	// If not reading from cache, do a regular read and decrypt.
-	if (!emu_storage)
-		res = emmc_part_write(system_part, sector, count, bis_cache->dma_buff);
-	else
+	if(emu_storage){
 		res = sdmmc_storage_write(emu_storage, emu_offset + system_part->lba_start + sector, count, bis_cache->dma_buff);
+	}else if(file_based){
+		res = file_based_read_write(system_part->lba_start + sector, count, bis_cache->dma_buff, true);
+	}else{
+		res = emmc_part_write(system_part, sector, count, bis_cache->dma_buff);
+	}
+
 	if (!res)
 		return 1; // R/W error.
 
@@ -156,10 +229,13 @@ static int nx_emmc_bis_read_block_normal(u32 sector, u32 count, void *buff)
 	u32  sector_in_cluster = sector % BIS_CLUSTER_SECTORS;
 
 	// If not reading from cache, do a regular read and decrypt.
-	if (!emu_storage)
-		res = emmc_part_read(system_part, sector, count, bis_cache->dma_buff);
-	else
+	if(emu_storage){
 		res = sdmmc_storage_read(emu_storage, emu_offset + system_part->lba_start + sector, count, bis_cache->dma_buff);
+	}else if(file_based){
+		res = file_based_read_write(system_part->lba_start + sector, count, bis_cache->dma_buff, false);
+	}else{
+		res = emmc_part_read(system_part, sector, count, bis_cache->dma_buff);
+	}
 	if (!res)
 		return 1; // R/W error.
 
@@ -213,10 +289,14 @@ static int nx_emmc_bis_read_block_cached(u32 sector, u32 count, void *buff)
 	cache_lookup_tbl[cluster] = bis_cache->top_idx;
 
 	// Read the whole cluster the sector resides in.
-	if (!emu_storage)
-		res = emmc_part_read(system_part, cluster_sector, BIS_CLUSTER_SECTORS, bis_cache->dma_buff);
-	else
+	if (emu_storage){
 		res = sdmmc_storage_read(emu_storage, emu_offset + system_part->lba_start + cluster_sector, BIS_CLUSTER_SECTORS, bis_cache->dma_buff);
+	}else if(file_based){
+		res = file_based_read_write(system_part->lba_start + cluster_sector, BIS_CLUSTER_SECTORS, bis_cache->dma_buff, false);
+	}else{
+		res = emmc_part_read(system_part, cluster_sector, BIS_CLUSTER_SECTORS, bis_cache->dma_buff);
+	}
+
 	if (!res)
 		return 1; // R/W error.
 
@@ -320,12 +400,38 @@ void nx_emmc_bis_init(emmc_part_t *part, bool enable_cache, sdmmc_storage_t *sto
 		system_part = NULL;
 }
 
+void nx_emmc_bis_init_file_based(emmc_part_t *part, bool enable_cache, const char *base_path){
+	strcpy(file_based_path, base_path);
+	file_based = true;
+
+	strcat(file_based_path, "00");
+
+	FILINFO fi;
+	if(f_stat(file_based_path, &fi) == FR_OK){
+		file_based_part_sz = fi.fsize >> 9;
+	}else{
+		file_based_part_sz = 0;
+	}
+
+	nx_emmc_bis_init(part, enable_cache, NULL, 0);
+}
+
 void nx_emmc_bis_end()
 {
 	_nx_emmc_bis_flush_cache();
+
+	if(file_based){
+		if(active_file_idx != -1){
+			f_close(&cur_file);
+		}
+	}
+
 	system_part = NULL;
 	emu_storage = NULL;
 	emu_offset = 0;
+	file_based_path[0] = '\0';
+	file_based = false;
+	active_file_idx = -1;
 }
 
 sdmmc_storage_t *nx_emmc_bis_get_storage(){
