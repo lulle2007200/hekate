@@ -36,6 +36,7 @@
 #include <libs/fatfs/ff.h>
 #include <storage/boot_storage.h>
 #include <storage/emmc.h>
+#include <storage/emummc.h>
 #include <storage/mbr_gpt.h>
 #include <storage/sd.h>
 #include <storage/sdmmc.h>
@@ -376,6 +377,9 @@ static lv_res_t _create_mbox_ums_error(int error)
 	case 7:
 		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 No emuSD found active!#");
 		break;
+	case 8:
+		lv_mbox_set_text(mbox, "#FF8000 USB Mass Storage#\n\n#FFFF00 Failed to initialize file based emuMMC!#");
+		break;
 	}
 
 	lv_mbox_add_btns(mbox, mbox_btn_map, mbox_action);
@@ -604,6 +608,7 @@ static lv_res_t _ums_emummc(u32 part){
 	emummc_cfg_t emu_info;
 
 	int error = !boot_storage_mount();
+	bool file_based = false;
 
 	if(!error){
 		load_emummc_cfg(&emu_info);
@@ -623,30 +628,62 @@ static lv_res_t _ums_emummc(u32 part){
 				storage = &sd_storage;
 			}else if(emu_info.enabled == 1 && !emu_info.sector){
 				// sd file based
-				error = 5;
+				if(!sd_mount()){
+					error = 4;
+				}else{
+					file_based = true;
+					char path[0x80];
+					strcpy(path, emu_info.path);
+					strcat(path, "/eMMC/");
+					if(!emummc_storage_file_based_init(path)){
+						error = 8;
+					}else{
+						switch(part){
+						case NYX_UMS_EMUMMC_BOOT0:
+							emummc_storage_file_base_set_partition(1);
+							break;
+						case NYX_UMS_EMUMMC_BOOT1:
+							emummc_storage_file_base_set_partition(2);
+							break;
+						case NYX_UMS_EMUMMC_GPP:
+							emummc_storage_file_base_set_partition(0);
+							break;
+						}
+					}
+				}
 			}
 		}else{
 			error = 2;
 		}
 
-		if(error == 0 && (emu_info.enabled == 4 || (emu_info.enabled == 1 && emu_info.sector))){
+		if(error == 0 && emu_info.enabled == 1){
 			error = 6;
-			usbs.offset = emu_info.sector;
-			switch(part){
-			case NYX_UMS_EMUMMC_BOOT0:
-				usbs.offset += 0;
-				break;
-			case NYX_UMS_EMUMMC_BOOT1:
-				usbs.offset += 0x2000;
-				break;
-			case NYX_UMS_EMUMMC_GPP:
-				usbs.offset += 0x4000;
-				break;
+			if(file_based){
+				usbs.offset = 0;
+			}else{
+				usbs.offset = emu_info.sector;
+				switch(part){
+				case NYX_UMS_EMUMMC_BOOT0:
+					usbs.offset += 0;
+					break;
+				case NYX_UMS_EMUMMC_BOOT1:
+					usbs.offset += 0x2000;
+					break;
+				case NYX_UMS_EMUMMC_GPP:
+					usbs.offset += 0x4000;
+					break;
+				}
 			}
 
 			if(part == NYX_UMS_EMUMMC_GPP){
 				gpt_header_t *gpt_hdr = malloc(sizeof(*gpt_hdr));
-				if(sdmmc_storage_read(storage, usbs.offset + 1, 1, gpt_hdr)){
+				int res;
+				if(file_based){
+					res = emummc_storage_file_based_read(1, 1, gpt_hdr);
+				}else{
+					res = sdmmc_storage_read(storage, usbs.offset + 1, 1, gpt_hdr);
+				}
+				if(res){
 					if(!memcmp(&gpt_hdr->signature, "EFI PART", 8)){
 						error = 0;
 						usbs.sectors = gpt_hdr->alt_lba + 1;
@@ -654,6 +691,7 @@ static lv_res_t _ums_emummc(u32 part){
 				}
 				free(gpt_hdr);
 			}else{
+				error = 0;
 				usbs.sectors = 0x2000;
 			}
 		}
@@ -669,14 +707,29 @@ static lv_res_t _ums_emummc(u32 part){
 	if(error){
 		_create_mbox_ums_error(error);
 	}else{
-		usbs.type = emu_info.enabled == 4 ? MMC_EMMC : MMC_SD;
-		usbs.partition = EMMC_GPP + 1;
+		if(file_based){
+			usbs.type = MMC_EMUMMC_FILE;
+		}else{
+			usbs.type = emu_info.enabled == 4 ? MMC_EMUMMC_RAW_EMMC : MMC_EMUMMC_RAW_SD;
+		}
+		switch(part){
+		case NYX_UMS_EMUMMC_BOOT0:
+			usbs.partition = EMMC_GPP + 1;
+			break;
+		case NYX_UMS_EMUMMC_BOOT1:
+			usbs.partition = EMMC_BOOT1 + 1;
+			break;
+		case NYX_UMS_EMUMMC_GPP:
+			usbs.partition = EMMC_BOOT0 + 1;
+			break;
+		}
 		usbs.ro = usb_msc_emmc_read_only;
 		usbs.system_maintenance = &manual_system_maintenance;
 		usbs.set_text = &usb_gadget_set_text;
 		_create_mbox_ums(&usbs, part);
 	}
 
+	emummc_storage_file_based_end();
 	boot_storage_unmount();
 
 	return LV_RES_OK;
