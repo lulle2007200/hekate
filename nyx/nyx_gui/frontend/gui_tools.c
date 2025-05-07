@@ -609,6 +609,7 @@ static lv_res_t _ums_emummc(u32 part){
 
 	int error = !boot_storage_mount();
 	bool file_based = false;
+	char path[0x80];
 
 	if(!error){
 		load_emummc_cfg(&emu_info);
@@ -632,7 +633,6 @@ static lv_res_t _ums_emummc(u32 part){
 					error = 4;
 				}else{
 					file_based = true;
-					char path[0x80];
 					strcpy(path, emu_info.path);
 					strcat(path, "/eMMC/");
 					if(!emummc_storage_file_based_init(path)){
@@ -676,20 +676,25 @@ static lv_res_t _ums_emummc(u32 part){
 			}
 
 			if(part == NYX_UMS_EMUMMC_GPP){
-				gpt_header_t *gpt_hdr = malloc(sizeof(*gpt_hdr));
-				int res;
 				if(file_based){
-					res = emummc_storage_file_based_read(1, 1, gpt_hdr);
-				}else{
-					res = sdmmc_storage_read(storage, usbs.offset + 1, 1, gpt_hdr);
-				}
-				if(res){
-					if(!memcmp(&gpt_hdr->signature, "EFI PART", 8)){
+					error = 8;
+					u32 sz = emummc_storage_file_based_get_total_gpp_size(path);
+					if(sz){
 						error = 0;
-						usbs.sectors = gpt_hdr->alt_lba + 1;
 					}
+					usbs.sectors = sz;
+				}else{
+					int res;
+					gpt_header_t *gpt_hdr = malloc(sizeof(*gpt_hdr));
+					res = sdmmc_storage_read(storage, usbs.offset + 1, 1, gpt_hdr);
+					if(res){
+						if(!memcmp(&gpt_hdr->signature, "EFI PART", 8)){
+							error = 0;
+							usbs.sectors = gpt_hdr->alt_lba + 1;
+						}
+					}
+					free(gpt_hdr);
 				}
-				free(gpt_hdr);
 			}else{
 				error = 0;
 				usbs.sectors = 0x2000;
