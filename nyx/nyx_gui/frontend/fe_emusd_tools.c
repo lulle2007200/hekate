@@ -54,7 +54,7 @@ void save_emusd_cfg(u32 part_idx, u32 sector_start){
 	// Add config entry.
 	f_puts("[emusd]\nenabled=", &fp);
 	if(sector_start){
-		f_puts("1", &fp);
+		f_puts("4", &fp);
 	}else{
 		f_puts("0", &fp);
 	}

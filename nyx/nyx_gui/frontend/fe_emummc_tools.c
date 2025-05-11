@@ -23,7 +23,7 @@
 #include <mem/heap.h>
 #include <storage/boot_storage.h>
 #include <storage/emmc.h>
-#include <storage/emummc.h>
+#include <storage/emummc_file_based.h>
 #include <storage/mbr_gpt.h>
 #include <storage/nx_emmc_bis.h>
 #include <storage/sd.h>

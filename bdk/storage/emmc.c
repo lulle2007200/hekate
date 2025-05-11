@@ -23,6 +23,7 @@
 #include <storage/mbr_gpt.h>
 #include <gfx_utils.h>
 #include <utils/list.h>
+#include <storage/emummc_file_based.h>
 
 static u16 emmc_errors[3] = { 0 }; // Init and Read/Write errors.
 static u32 emmc_mode = EMMC_MMC_HS400;

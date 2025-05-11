@@ -923,7 +923,9 @@ static void _launch_hos(u8 autoboot, u8 autoboot_list)
 
 	void (*main_ptr)() = (void *)nyx_str->hekate;
 
+	boot_storage_end();
 	sd_end();
+	emmc_end();
 
 	hw_deinit(false, 0);
 

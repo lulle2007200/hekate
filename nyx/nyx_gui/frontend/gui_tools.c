@@ -36,7 +36,7 @@
 #include <libs/fatfs/ff.h>
 #include <storage/boot_storage.h>
 #include <storage/emmc.h>
-#include <storage/emummc.h>
+#include <storage/emummc_file_based.h>
 #include <storage/mbr_gpt.h>
 #include <storage/sd.h>
 #include <storage/sdmmc.h>

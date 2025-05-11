@@ -1,5 +1,5 @@
-#ifndef EMUMMC_H
-#define EMUMMC_H
+#ifndef _EMUMMC_FILE_BASED_H
+#define _EMUMMC_FILE_BASED_H
 
 #include <bdk.h>
 

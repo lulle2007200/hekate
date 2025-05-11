@@ -29,7 +29,7 @@
 #include <storage/emmc.h>
 #include <storage/sd.h>
 #include <storage/sdmmc.h>
-#include <storage/emummc.h>
+#include <storage/emummc_file_based.h>
 #include <utils/types.h>
 
 #define BIS_CLUSTER_SECTORS   32

@@ -786,6 +786,7 @@ int hos_launch(ini_sec_t *cfg)
 	}
 
 	// Check if SD Card is GPT.
+	// TODO: not relevant with emuSD
 	if (sd_is_gpt())
 	{
 		_hos_crit_error("SD has GPT only!");

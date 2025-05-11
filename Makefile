@@ -35,7 +35,7 @@ OBJS += $(addprefix $(BUILDDIR)/$(TARGET)/, \
 	mc.o sdram.o minerva.o \
 	gpio.o pinmux.o pmc.o se.o smmu.o tsec.o uart.o \
 	fuse.o kfuse.o \
-	sdmmc.o sdmmc_driver.o emmc.o sd.o emummc.o \
+	sdmmc.o sdmmc_driver.o emmc.o sd.o emummc.o emummc_file_based.o \
 	bq24193.o max17050.o max7762x.o max77620-rtc.o \
 	hw_init.o boot_storage.o \
 )

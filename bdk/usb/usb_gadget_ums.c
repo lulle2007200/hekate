@@ -20,7 +20,7 @@
  */
 
 #include <storage/emmc.h>
-#include <storage/emummc.h>
+#include <storage/emummc_file_based.h>
 #include <string.h>
 
 #include <usb/usbd.h>

@@ -224,8 +224,12 @@ static int _stat_and_copy_files(const char *src, const char *dst, char *path, u3
 
 	// Open directory.
 	res = f_opendir(&dir, path);
-	if (res != FR_OK)
+	if (res != FR_OK){
+		if(res == FR_NO_PATH){
+			return FR_OK;
+		}
 		return res;
+	}
 
 	if (labels)
 		lv_label_set_text(labels[0], path);
