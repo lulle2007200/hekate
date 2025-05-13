@@ -61,8 +61,10 @@
 extern volatile boot_cfg_t *b_cfg;
 extern volatile nyx_storage_t *nyx_str;
 
-#define DBG_PRINT(msg) gfx_printf(msg); gfx_putc('\n');
-#define DBG_PRINT_ARGS(msg, ...) gfx_printf(msg, __VA_ARGS__); gfx_putc('\n');
+// #define DBG_PRINT(msg) gfx_printf(msg); gfx_putc('\n');
+#define DBG_PRINT(msg) 
+// #define DBG_PRINT_ARGS(msg, ...) gfx_printf(msg, __VA_ARGS__); gfx_putc('\n');
+#define DBG_PRINT_ARGS(msg, ...) 
 
 
 typedef struct _partition_ctxt_t
@@ -3026,7 +3028,6 @@ static void _create_mbox_check_files_total_size(u8 drive)
 	bool has_hos_data = false;
 
 	sdmmc_storage_t *storage = drive == DRIVE_SD ? &sd_storage : &emmc_storage;
-	total_size = storage->sec_cnt;
 
 	// Read current MBR.
 	sdmmc_storage_read(storage, 0, 1, mbr);
@@ -3109,6 +3110,8 @@ static void _create_mbox_check_files_total_size(u8 drive)
 	lv_obj_set_width(h1, lv_obj_get_width(mbox) - LV_DPI * 3);
 
 
+	total_size = storage->sec_cnt;
+
 	u32 bar_hos_size       = 0;
 	u32 bar_emu_size       = 0;
 	u32 bar_l4t_size       = 0;
@@ -3186,19 +3189,20 @@ static void _create_mbox_check_files_total_size(u8 drive)
 		}
 	}
 
-	bar_remaining_size = total_size - (bar_l4t_size + bar_and_size + bar_hos_os_size + bar_hos_size + bar_emu_size + bar_emu_sd_size);
+	// bar_remaining_size = total_size - (bar_l4t_size + bar_and_size + bar_hos_os_size + bar_hos_size + bar_emu_size + bar_emu_sd_size);
 
+	const u32 total_size_gb = total_size / SECTORS_PER_GB;
 	lv_coord_t w = lv_obj_get_width(h1);
-	bar_remaining_size = w * (bar_remaining_size / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
-	bar_remaining_size = bar_remaining_size <= 7 ? 0 : bar_remaining_size;
-	bar_l4t_size       = w * (bar_l4t_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
-	bar_and_size       = w * (bar_and_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
-	bar_hos_os_size    = w * (bar_hos_os_size    / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
-	bar_hos_size       = w * (bar_hos_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
-	bar_emu_size       = w * (bar_emu_size       / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
-	bar_emu_sd_size    = w * (bar_emu_sd_size    / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
-	// bar_remaining_size = w - bar_emu_sd_size - bar_emu_size - bar_hos_size - bar_hos_os_size - bar_and_size - bar_l4t_size;
+	bar_l4t_size       = w * (bar_l4t_size       / SECTORS_PER_GB) / total_size_gb;
+	bar_and_size       = w * (bar_and_size       / SECTORS_PER_GB) / total_size_gb;
+	bar_hos_os_size    = w * (bar_hos_os_size    / SECTORS_PER_GB) / total_size_gb;
+	bar_hos_size       = w * (bar_hos_size       / SECTORS_PER_GB) / total_size_gb;
+	bar_emu_size       = w * (bar_emu_size       / SECTORS_PER_GB) / total_size_gb;
+	bar_emu_sd_size    = w * (bar_emu_sd_size    / SECTORS_PER_GB) / total_size_gb;
+	// bar_remaining_size = w * (bar_remaining_size / SECTORS_PER_GB) / (total_size / SECTORS_PER_GB);
 	// bar_remaining_size = bar_remaining_size <= 7 ? 0 : bar_remaining_size;
+	bar_remaining_size = w - bar_emu_sd_size - bar_emu_size - bar_hos_size - bar_hos_os_size - bar_and_size - bar_l4t_size;
+	bar_remaining_size = bar_remaining_size <= 7 ? 0 : bar_remaining_size;
 
 	// Create HOS OS bar.
 	lv_obj_t *bar_hos_os = lv_bar_create(h1, NULL);
@@ -3265,7 +3269,7 @@ static void _create_mbox_check_files_total_size(u8 drive)
 
 	// Create emuSD separator.
 	lv_obj_t *sep_emu_sd = lv_cont_create(h1, NULL);
-	lv_obj_set_size(sep_emu_sd, bar_emu_sd_size && (bar_emu_size || bar_and_size || bar_remaining_size || bar_l4t_size)? 8 : 0, LV_DPI / 3);
+	lv_obj_set_size(sep_emu_sd, bar_emu_sd_size && (bar_and_size || bar_remaining_size || bar_l4t_size)? 8 : 0, LV_DPI / 3);
 	lv_obj_set_style(sep_emu_sd, &sep_emu_sd_bg);
 	lv_obj_align(sep_emu_sd, bar_emu_sd, LV_ALIGN_OUT_RIGHT_MID, -4, 0);
 
