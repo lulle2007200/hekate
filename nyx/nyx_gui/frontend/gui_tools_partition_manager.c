@@ -3985,9 +3985,9 @@ lv_res_t create_window_partition_manager(lv_obj_t *btn, u8 drive)
 	lv_obj_t *slider_and = lv_slider_create(h1, NULL);
 	lv_obj_set_size(slider_and, LV_DPI * 7, LV_DPI / 3);
 	#ifdef ENABLE_DUAL_ANDROID
-	lv_slider_set_range(slider_and, 0, ((part_info.total_sct_available - extra_sct) / (ANDROID_SYSTEM_SIZE_MB / 1024)) * 2); // Subtract android reserved size.
+	lv_slider_set_range(slider_and, 0, ((part_info.total_sct_available - extra_sct) / SECTORS_PER_GB - (ANDROID_SYSTEM_SIZE_MB / 1024)) * 2); // Subtract android reserved size.
 	#else
-	lv_slider_set_range(slider_and, 0, (part_info.total_sct_available - extra_sct) / (ANDROID_SYSTEM_SIZE_MB / 1024)); // Subtract android reserved size.
+	lv_slider_set_range(slider_and, 0, (part_info.total_sct_available - extra_sct) / SECTORS_PER_GB - (ANDROID_SYSTEM_SIZE_MB / 1024)); // Subtract android reserved size.
 	#endif
 	lv_slider_set_value(slider_and, part_info.and_size >> 10);
 	lv_slider_set_style(slider_and, LV_SLIDER_STYLE_BG, &bar_and_bg);
