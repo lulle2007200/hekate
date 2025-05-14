@@ -28,6 +28,7 @@
 #include <libs/compr/blz.h>
 #include <libs/fatfs/ff.h>
 #include "../storage/emummc.h"
+#include "../storage/emusd.h"
 
 //#define DPRINTF(...) gfx_printf(__VA_ARGS__)
 #define DPRINTF(...)
@@ -667,6 +668,8 @@ const char *pkg2_patch_kips(link_t *info, char *patch_names)
 					emu_cfg.fs_ver--;
 				if (kip_id_idx > 17)
 					emu_cfg.fs_ver -= 2;
+
+				emu_sd_cfg.fs_ver = emu_cfg.fs_ver;
 
 				// Inject emuMMC code.
 				gfx_printf("Injecting emuMMC. FS ID: %d\n", emu_cfg.fs_ver);

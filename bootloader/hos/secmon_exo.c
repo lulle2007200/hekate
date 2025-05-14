@@ -24,14 +24,17 @@
 #include "../config.h"
 #include <libs/fatfs/ff.h>
 #include "../storage/emummc.h"
+#include "../storage/emusd.h"
 
 extern hekate_config h_cfg;
 
 enum emuMMC_Type
 {
-	emuMMC_None = 0,
-	emuMMC_Partition,
-	emuMMC_File,
+	EmummcType_None           = 0,
+    EmummcType_Partition_Sd   = 1,
+    EmummcType_File_Sd        = 2,
+    EmummcType_Partition_Emmc = 3,
+    EmummcType_File_Emmc      = 4,
 	emuMMC_MAX
 };
 
@@ -66,6 +69,21 @@ typedef struct
 		emummc_file_config_t file_cfg;
 	};
 	char nintendo_path[EMUMMC_FILE_PATH_MAX];
+} emummc_emmc_config_t;
+
+typedef struct
+{
+	emummc_base_config_t base_cfg;
+	union 
+	{
+		emummc_partition_config_t partition_cfg;
+	};
+} emummc_sd_config_t;
+
+typedef struct
+{
+	emummc_emmc_config_t emmc_cfg;
+	emummc_sd_config_t sd_cfg;
 } exo_emummc_config_t;
 
 typedef struct _exo_cfg_t
@@ -316,22 +334,55 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 		pkg1_warmboot_rsa_mod(warmboot_base);
 	}
 
+	// By default, disable emuMMC
+	exo_cfg->emummc_cfg.emmc_cfg.base_cfg.magic = EMUMMC_MAGIC;
+	exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_None;
 	if (emu_cfg.enabled && !h_cfg.emummc_force_disable)
 	{
-		exo_cfg->emummc_cfg.base_cfg.magic = EMUMMC_MAGIC;
-		exo_cfg->emummc_cfg.base_cfg.type = emu_cfg.sector ? emuMMC_Partition : emuMMC_File;
-		exo_cfg->emummc_cfg.base_cfg.fs_ver = emu_cfg.fs_ver;
-		exo_cfg->emummc_cfg.base_cfg.id = emu_cfg.id;
+		exo_cfg->emummc_cfg.emmc_cfg.base_cfg.fs_ver = emu_cfg.fs_ver;
+		exo_cfg->emummc_cfg.emmc_cfg.base_cfg.id = emu_cfg.id;
+		if (emu_cfg.enabled == 4 && emu_cfg.sector) {
+			// emmc partition based
+			exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_Partition_Emmc;
+		} else if (emu_cfg.enabled == 4 && !emu_cfg.sector) {
+			// emmc file based
+			exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_File_Emmc;
+		} else if (emu_cfg.enabled == 1 && emu_cfg.sector) {
+			// sd partition based
+			exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_Partition_Sd;
+		} else if (emu_cfg.enabled == 1 && !emu_cfg.sector) {
+			// sd file based
+			exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_File_Sd;
+		} else {
+			// disabled
+			exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_None;
+		}
 
 		if (emu_cfg.sector)
-			exo_cfg->emummc_cfg.partition_cfg.start_sector = emu_cfg.sector;
+			exo_cfg->emummc_cfg.emmc_cfg.partition_cfg.start_sector = emu_cfg.sector;
 		else
-			strcpy((char *)exo_cfg->emummc_cfg.file_cfg.path, emu_cfg.path);
+			strcpy((char *)exo_cfg->emummc_cfg.emmc_cfg.file_cfg.path, emu_cfg.path);
 
 		if (!ctxt->stock && emu_cfg.nintendo_path && emu_cfg.nintendo_path[0])
-			strcpy((char *)exo_cfg->emummc_cfg.nintendo_path, emu_cfg.nintendo_path);
+			strcpy((char *)exo_cfg->emummc_cfg.emmc_cfg.nintendo_path, emu_cfg.nintendo_path);
 		else
-			strcpy((char *)exo_cfg->emummc_cfg.nintendo_path, "Nintendo");
+			strcpy((char *)exo_cfg->emummc_cfg.emmc_cfg.nintendo_path, "Nintendo");
+	}
+
+	exo_cfg->emummc_cfg.sd_cfg.base_cfg.magic = EMUMMC_MAGIC;
+	exo_cfg->emummc_cfg.sd_cfg.base_cfg.id = emu_sd_cfg.id;
+	if (emu_sd_cfg.enabled) 
+	{
+		exo_cfg->emummc_cfg.sd_cfg.base_cfg.fs_ver = emu_sd_cfg.fs_ver;
+		exo_cfg->emummc_cfg.sd_cfg.partition_cfg.start_sector = emu_sd_cfg.sector;
+		if(emu_sd_cfg.enabled == 4 && emu_sd_cfg.sector) {
+			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_Partition_Emmc;
+		}else {
+			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_None;
+		}
+
+	} else {
+		exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_None;
 	}
 
 	// Copy over exosphere fatal for Mariko.

@@ -22,6 +22,7 @@
 #include <bdk.h>
 
 #include "config.h"
+#include "gfx/gfx.h"
 #include "gfx/logos.h"
 #include "gfx/tui.h"
 #include "hos/hos.h"
@@ -35,6 +36,7 @@
 
 #include "frontend/fe_tools.h"
 #include "frontend/fe_info.h"
+#include "storage/emusd.h"
 
 hekate_config h_cfg;
 boot_cfg_t __attribute__((section ("._boot_cfg"))) b_cfg;
@@ -339,6 +341,7 @@ static void _launch_ini_list()
 	u8 max_entries = 61;
 	char *special_path = NULL;
 	char *emummc_path  = NULL;
+	char *emusd_path   = NULL;
 	ment_t *ments      = NULL;
 	ini_sec_t *cfg_sec = NULL;
 
@@ -403,11 +406,19 @@ static void _launch_ini_list()
 					h_cfg.emummc_force_disable = atoi(kv->val);
 				else if (!strcmp("emupath", kv->key))
 					emummc_path = kv->val;
+				else if (!strcmp("emusdpath", kv->key))
+					emusd_path = kv->val;
 			}
 
+			// TODO: also check emuSD path
 			if (emummc_path && !emummc_set_path(emummc_path))
 			{
 				EPRINTF("emupath is wrong!");
+				goto wrong_emupath;
+			}
+
+			if (emusd_path && !emusd_set_path(emusd_path)){
+				EPRINTF("emusdpath is wrong!");
 				goto wrong_emupath;
 			}
 		}
@@ -455,6 +466,12 @@ wrong_emupath:
 			boot_storage_mount();
 			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
 		}
+
+		if (emusd_path)
+		{
+			boot_storage_mount();
+			emusd_load_cfg();
+		}
 	}
 
 out:
@@ -468,6 +485,7 @@ static void _launch_config()
 	u8 max_entries = 61;
 	char *special_path = NULL;
 	char *emummc_path  = NULL;
+	char *emusd_path   = NULL;
 
 	ment_t *ments      = NULL;
 	ini_sec_t *cfg_sec = NULL;
@@ -482,6 +500,7 @@ static void _launch_config()
 
 	// Load emuMMC configuration.
 	emummc_load_cfg();
+	emusd_load_cfg();
 
 	// Parse main configuration.
 	ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false);
@@ -548,11 +567,19 @@ static void _launch_config()
 				h_cfg.emummc_force_disable = atoi(kv->val);
 			if (!strcmp("emupath", kv->key))
 				emummc_path = kv->val;
+			if (!strcmp("emusdpath", kv->key))
+				emusd_path = kv->val;
 		}
 
 		if (emummc_path && !emummc_set_path(emummc_path))
 		{
 			EPRINTF("emupath is wrong!");
+			goto wrong_emupath;
+		}
+
+		if (emusd_path && !emusd_set_path(emusd_path))
+		{
+			EPRINTF("emusdpath is wrong!");
 			goto wrong_emupath;
 		}
 	}
@@ -599,6 +626,12 @@ wrong_emupath:
 		{
 			boot_storage_mount();
 			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
+		}
+
+		if (emusd_path)
+		{
+			boot_storage_mount();
+			emusd_load_cfg();
 		}
 	}
 
@@ -682,7 +715,7 @@ static void _nyx_load_run()
 	(*nyx_ptr)();
 }
 
-static ini_sec_t *_get_ini_sec_from_id(ini_sec_t *ini_sec, char **bootlogoCustomEntry, char **emummc_path)
+static ini_sec_t *_get_ini_sec_from_id(ini_sec_t *ini_sec, char **bootlogoCustomEntry, char **emummc_path, char **emusd_path)
 {
 	ini_sec_t *cfg_sec = NULL;
 
@@ -701,10 +734,13 @@ static ini_sec_t *_get_ini_sec_from_id(ini_sec_t *ini_sec, char **bootlogoCustom
 			*bootlogoCustomEntry = kv->val;
 		else if (!strcmp("emummc_force_disable", kv->key))
 			h_cfg.emummc_force_disable = atoi(kv->val);
+		else if (!strcmp("emusdpath", kv->key))
+			*emusd_path = kv->val;
 	}
 	if (!cfg_sec)
 	{
 		*emummc_path               = NULL;
+		*emusd_path                = NULL;
 		*bootlogoCustomEntry       = NULL;
 		h_cfg.emummc_force_disable = false;
 	}
@@ -759,6 +795,7 @@ static void _auto_launch()
 	u32 boot_entry_id         = 0;
 	ini_sec_t *cfg_sec        = NULL;
 	char *emummc_path         = NULL;
+	char *emusd_path          = NULL;
 	char *bootlogoCustomEntry = NULL;
 	bool  config_entry_found  = false;
 
@@ -776,6 +813,7 @@ static void _auto_launch()
 
 	// Load emuMMC configuration.
 	emummc_load_cfg();
+	emusd_load_cfg();
 
 	// Parse hekate main configuration.
 	if (!ini_parse(&ini_sections, "bootloader/hekate_ipl.ini", false))
@@ -831,7 +869,7 @@ static void _auto_launch()
 			}
 
 			if (boot_from_id)
-				cfg_sec = _get_ini_sec_from_id(ini_sec, &bootlogoCustomEntry, &emummc_path);
+				cfg_sec = _get_ini_sec_from_id(ini_sec, &bootlogoCustomEntry, &emummc_path, &emusd_path);
 			else if (h_cfg.autoboot == boot_entry_id && config_entry_found)
 			{
 				cfg_sec = ini_sec;
@@ -841,6 +879,8 @@ static void _auto_launch()
 						bootlogoCustomEntry = kv->val;
 					else if (!strcmp("emupath", kv->key))
 						emummc_path = kv->val;
+					else if (!strcmp("emusdpath", kv->key))
+						emusd_path = kv->val;
 					else if (!strcmp("emummc_force_disable", kv->key))
 						h_cfg.emummc_force_disable = atoi(kv->val);
 					else if (!strcmp("bootwait", kv->key))
@@ -877,7 +917,7 @@ static void _auto_launch()
 				continue;
 
 			if (boot_from_id)
-				cfg_sec = _get_ini_sec_from_id(ini_sec_list, &bootlogoCustomEntry, &emummc_path);
+				cfg_sec = _get_ini_sec_from_id(ini_sec_list, &bootlogoCustomEntry, &emummc_path, &emusd_path);
 			else if (h_cfg.autoboot == boot_entry_id)
 			{
 				h_cfg.emummc_force_disable = false;
@@ -888,6 +928,8 @@ static void _auto_launch()
 						bootlogoCustomEntry = kv->val;
 					else if (!strcmp("emupath", kv->key))
 						emummc_path = kv->val;
+					else if (!strcmp("emusdpath", kv->key))
+						emusd_path = kv->val;
 					else if (!strcmp("emummc_force_disable", kv->key))
 						h_cfg.emummc_force_disable = atoi(kv->val);
 					else if (!strcmp("bootwait", kv->key))
@@ -1001,12 +1043,20 @@ skip_list:
 	}
 	else
 	{
+		// TODO: add boot_cfg for emusd
 		if (b_cfg.boot_cfg & BOOT_CFG_TO_EMUMMC)
 			emummc_set_path(b_cfg.emummc_path);
 		else if (emummc_path && !emummc_set_path(emummc_path))
 		{
 			gfx_con.mute = false;
 			EPRINTF("emupath is wrong!");
+			goto wrong_emupath;
+		}
+
+		if (emusd_path && !emusd_set_path(emusd_path))
+		{
+			gfx_con.mute = false;
+			EPRINTF("emusdpath is wrong!");
 			goto wrong_emupath;
 		}
 
@@ -1017,6 +1067,12 @@ wrong_emupath:
 		{
 			boot_storage_mount();
 			emummc_load_cfg(); // Reload emuMMC config in case of emupath.
+		}
+
+		if (emusd_path) 
+		{
+			boot_storage_mount();
+			emusd_load_cfg();
 		}
 
 error:

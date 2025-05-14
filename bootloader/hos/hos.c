@@ -28,6 +28,7 @@
 #include "../frontend/fe_tools.h"
 #include "../config.h"
 #include "../storage/emummc.h"
+#include "../storage/emusd.h"
 #include <storage/boot_storage.h>
 
 extern hekate_config h_cfg;
@@ -815,7 +816,8 @@ void hos_launch(ini_sec_t *cfg)
 
 	kb = ctxt.pkg1_id->kb;
 
-	bool emummc_enabled = emu_cfg.enabled && !h_cfg.emummc_force_disable;
+	//  TODO: separate force_disable for emuSD?
+	bool emummc_enabled = (emu_cfg.enabled || emu_sd_cfg.enabled) && !h_cfg.emummc_force_disable;
 
 	// Enable emummc patching.
 	if (emummc_enabled)

@@ -19,19 +19,6 @@
 
 #include <bdk.h>
 
-typedef enum
-{
-	EMUMMC_TYPE_NONE      = 0,
-	EMUMMC_TYPE_PARTITION = 1,
-	EMUMMC_TYPE_FILES     = 2,
-} emummc_type_t;
-
-typedef enum {
-	EMUMMC_MMC_NAND = 0,
-	EMUMMC_MMC_SD   = 1,
-	EMUMMC_MMC_GC   = 2,
-} emummc_mmc_t;
-
 typedef struct _emummc_cfg_t
 {
 	int   enabled;

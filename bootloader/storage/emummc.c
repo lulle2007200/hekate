@@ -24,6 +24,7 @@
 
 #include "emummc.h"
 #include "../config.h"
+#include "gfx_utils.h"
 #include <libs/fatfs/ff.h>
 #include <storage/emummc_file_based.h>
 
@@ -173,6 +174,11 @@ static int emummc_raw_get_part_off(int part_idx)
 
 int emummc_storage_init_mmc()
 {
+	gfx_con.mute = false;
+
+
+	gfx_printf("en %d path %s\n", emu_cfg.enabled, emu_cfg.path);
+
 	// FILINFO fno;
 	emu_cfg.active_part = 0;
 
@@ -190,11 +196,12 @@ int emummc_storage_init_mmc()
 		if(!emu_cfg.sector){
 			// file based
 			if(!emmc_mount()){
+				gfx_printf("emmc mount fail\n");
 				return 1;
 			}
 			strcpy(emu_cfg.emummc_file_based_path, "emmc:");
 			strcat(emu_cfg.emummc_file_based_path, emu_cfg.path);
-			strcat(emu_cfg.emummc_file_based_path, "/eMMC");
+			strcat(emu_cfg.emummc_file_based_path, "/eMMC/");
 			file_based = true;
 		}else{
 			// raw based
@@ -209,7 +216,7 @@ int emummc_storage_init_mmc()
 			}
 			strcpy(emu_cfg.emummc_file_based_path, "sd:");
 			strcat(emu_cfg.emummc_file_based_path, emu_cfg.path);
-			strcat(emu_cfg.emummc_file_based_path, "/eMMC");
+			strcat(emu_cfg.emummc_file_based_path, "/eMMC/");
 			file_based = true;
 		}else{
 			// raw based
@@ -220,6 +227,7 @@ int emummc_storage_init_mmc()
 	}
 
 	if(file_based){
+		gfx_printf("file based\n");
 		return emummc_storage_file_based_init(emu_cfg.emummc_file_based_path) == 0;
 	}
 

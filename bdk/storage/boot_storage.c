@@ -251,3 +251,17 @@ int boot_storage_save_to_file(const void *buf, u32 size, const char *filename)
 
 	return 0;
 }
+
+FATFS *boot_storage_get_fs() {
+	switch(drive_cur){
+	case DRIVE_BOOT1:
+		return &boot_storage_fs;
+	case DRIVE_EMMC:
+		return &emmc_fs;
+	case DRIVE_BOOT1_1MB:
+		return &boot_storage_fs;
+	case DRIVE_SD:
+		return &sd_fs;
+	}
+	return NULL;
+}
