@@ -426,12 +426,12 @@ static int _dump_emummc_file_part(emmc_tool_gui_t *gui, char *sd_path, sdmmc_sto
 
 	FATFS *fs = drive == DRIVE_SD ? &sd_fs : &emmc_fs;
 	if(drive == DRIVE_SD){
-		free_space = (u32)(fs->free_clst * fs->csize >> SECTORS_TO_MIB_COEFF);
+		free_space = (u32)((fs->free_clst * fs->csize) >> SECTORS_TO_MIB_COEFF);
 		s_printf(gui->txt_buf, "#96FF00 SD Card free space:# %d MiB\n#96FF00 Total size:# %d MiB\n\n",
 			free_space,
 			sectors_left >> SECTORS_TO_MIB_COEFF);
 	}else{
-		free_space = (u32)(fs->free_clst * fs->csize >> SECTORS_TO_MIB_COEFF);
+		free_space = (u32)((fs->free_clst * fs->csize) >> SECTORS_TO_MIB_COEFF);
 		s_printf(gui->txt_buf, "#96FF00 eMMC free space:# %d MiB\n#96FF00 Total size:# %d MiB\n\n",
 			free_space,
 			sectors_left >> SECTORS_TO_MIB_COEFF);

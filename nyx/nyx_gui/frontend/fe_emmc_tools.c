@@ -770,14 +770,16 @@ void dump_emmc_selected(emmcPartType_t dumpType, emmc_tool_gui_t *gui)
 	lv_label_set_text(gui->label_info, "Checking for available free space...");
 	manual_system_maintenance(true);
 
-	if (!sd_mount())
+	if (!boot_storage_mount())
 	{
-		lv_label_set_text(gui->label_info, "#FFDD00 Failed to init SD!#");
+		lv_label_set_text(gui->label_info, "#FFDD00 Failed to storage!#");
 		goto out;
 	}
 
 	// Get SD Card free space for Partial Backup.
-	f_getfree("", &sd_fs.free_clst, NULL);
+	FATFS *fs = boot_storage_get_fs();
+
+	f_getfree("", &fs->free_clst, NULL);
 
 	if (!emmc_initialize(false))
 	{

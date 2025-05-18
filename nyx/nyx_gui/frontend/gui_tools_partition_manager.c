@@ -300,15 +300,12 @@ static int _stat_and_copy_files(const char *src, const char *dst, char *path, u3
 					u32 chunk_size = MIN(file_bytes_left, SZ_4M); // 4MB chunks.
 					file_bytes_left -= chunk_size;
 
-					u32 res1;
 					// Copy file to buffer.
-					res1 = f_read(&fp_src, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
-					DBG_PRINT_ARGS("res read: %d", res1);
+					f_read(&fp_src, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
 					manual_system_maintenance(true);
 
 					// Write file to disk.
-					res1 = f_write(&fp_dst, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
-					DBG_PRINT_ARGS("res write: %d", res1);
+					f_write(&fp_dst, (void *)SDXC_BUF_ALIGNED, chunk_size, NULL);
 
 				}
 
