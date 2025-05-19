@@ -21,6 +21,7 @@
 
 #include <storage/emmc.h>
 #include <storage/emummc_file_based.h>
+#include <storage/file_based_storage.h>
 #include <string.h>
 
 #include <usb/usbd.h>
@@ -500,6 +501,10 @@ static int _scsi_read(usbd_gadget_ums_t *ums, bulk_ctxt_t *bulk_ctxt)
 		if(ums->lun.storage){
 			if (!sdmmc_storage_read(ums->lun.storage, ums->lun.offset + lba_offset, amount, sdmmc_buf))
 				amount = 0;
+		}else if (ums->lun.type == MMC_FILE_BASED) {
+			if(!file_based_storage_read(ums->lun.offset + lba_offset, amount, sdmmc_buf)){
+				amount = 0;
+			}
 		}else{
 			if(!emummc_storage_file_based_read(ums->lun.offset + lba_offset, amount, sdmmc_buf)){
 				amount = 0;
@@ -662,6 +667,10 @@ static int _scsi_write(usbd_gadget_ums_t *ums, bulk_ctxt_t *bulk_ctxt)
 				if (!sdmmc_storage_write(ums->lun.storage, ums->lun.offset + lba_offset,
 					amount >> UMS_DISK_LBA_SHIFT, (u8 *)bulk_ctxt->bulk_out_buf))
 					amount = 0;
+			}else if(ums->lun.type == MMC_FILE_BASED){
+				if(!file_based_storage_write(ums->lun.offset + lba_offset, amount >> UMS_DISK_LBA_SHIFT, (u8*)bulk_ctxt->bulk_out_buf)){
+					amount = 0;
+				}
 			}else{
 				if(!emummc_storage_file_based_write(ums->lun.offset + lba_offset, amount >> UMS_DISK_LBA_SHIFT, (u8*)bulk_ctxt->bulk_out_buf)){
 					amount = 0;
@@ -739,6 +748,10 @@ static int _scsi_verify(usbd_gadget_ums_t *ums, bulk_ctxt_t *bulk_ctxt)
 		if(ums->lun.storage){
 			if (!sdmmc_storage_read(ums->lun.storage, ums->lun.offset + lba_offset, amount, bulk_ctxt->bulk_in_buf))
 				amount = 0;
+		}else if(ums->lun.type == MMC_FILE_BASED){
+			if(!file_based_storage_read(ums->lun.offset + lba_offset, amount, bulk_ctxt->bulk_in_buf)){
+				amount = 0;
+			}
 		}else{
 			if(!emummc_storage_file_based_read(ums->lun.offset + lba_offset, amount, bulk_ctxt->bulk_in_buf)){
 				amount = 0;
@@ -1934,6 +1947,10 @@ int usb_device_gadget_ums(usb_ctxt_t *usbs)
 		}
 		ums.lun.storage = NULL;
 		ums.lun.sdmmc = NULL;
+	}else if(usbs->type == MMC_FILE_BASED){
+		// file based must be initialized at this point
+		ums.lun.storage = NULL;
+		ums.lun.sdmmc = NULL;
 	} else{
 		if (!emmc_initialize(false))
 		{
@@ -1979,6 +1996,9 @@ int usb_device_gadget_ums(usb_ctxt_t *usbs)
 		case MMC_EMUMMC_RAW_SD:
 		case MMC_EMUMMC_RAW_EMMC:
 			ums.set_text(ums.label, "#FFDD00 No sector count set for emuMMC!#");
+			break;
+		case MMC_FILE_BASED:
+			ums.set_text(ums.label, "#FFDD00 No sector count set for emuSD!#");
 			break;
 		}
 	}

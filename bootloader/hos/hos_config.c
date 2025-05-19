@@ -16,6 +16,7 @@
  */
 
 #include <storage/boot_storage.h>
+#include "../storage/emusd.h"
 #include <string.h>
 
 #include <bdk.h>
@@ -30,7 +31,7 @@
 
 static int _config_warmboot(launch_ctxt_t *ctxt, const char *value)
 {
-	ctxt->warmboot = boot_storage_file_read(value, &ctxt->warmboot_size);
+	ctxt->warmboot = emusd_file_read(value, &ctxt->warmboot_size);
 	if (!ctxt->warmboot)
 		return 0;
 
@@ -39,7 +40,7 @@ static int _config_warmboot(launch_ctxt_t *ctxt, const char *value)
 
 static int _config_secmon(launch_ctxt_t *ctxt, const char *value)
 {
-	ctxt->secmon = boot_storage_file_read(value, &ctxt->secmon_size);
+	ctxt->secmon = emusd_file_read(value, &ctxt->secmon_size);
 	if (!ctxt->secmon)
 		return 0;
 
@@ -48,7 +49,7 @@ static int _config_secmon(launch_ctxt_t *ctxt, const char *value)
 
 static int _config_kernel(launch_ctxt_t *ctxt, const char *value)
 {
-	ctxt->kernel = boot_storage_file_read(value, &ctxt->kernel_size);
+	ctxt->kernel = emusd_file_read(value, &ctxt->kernel_size);
 	if (!ctxt->kernel)
 		return 0;
 
@@ -62,7 +63,8 @@ static int _config_kip1(launch_ctxt_t *ctxt, const char *value)
 	if (value[strlen(value) - 1] == '*')
 	{
 		char *dir = (char *)malloc(256);
-		strcpy(dir, value);
+		strcpy(dir, "emusd:");
+		strcat(dir, value);
 
 		u32 dirlen = 0;
 		dir[strlen(dir) - 2] = 0;
@@ -82,7 +84,7 @@ static int _config_kip1(launch_ctxt_t *ctxt, const char *value)
 				strcpy(dir + dirlen, filelist->name[i]);
 
 				merge_kip_t *mkip1 = (merge_kip_t *)malloc(sizeof(merge_kip_t));
-				mkip1->kip1 = boot_storage_file_read(dir, &size);
+				mkip1->kip1 = emusd_file_read(dir + 6, &size);
 				if (!mkip1->kip1)
 				{
 					free(mkip1);
@@ -104,7 +106,7 @@ static int _config_kip1(launch_ctxt_t *ctxt, const char *value)
 	else
 	{
 		merge_kip_t *mkip1 = (merge_kip_t *)malloc(sizeof(merge_kip_t));
-		mkip1->kip1 = boot_storage_file_read(value, &size);
+		mkip1->kip1 = emusd_file_read(value, &size);
 		if (!mkip1->kip1)
 		{
 			free(mkip1);
@@ -263,7 +265,7 @@ static int _config_pkg3(launch_ctxt_t *ctxt, const char *value)
 
 static int _config_exo_fatal_payload(launch_ctxt_t *ctxt, const char *value)
 {
-	ctxt->exofatal = boot_storage_file_read(value, &ctxt->exofatal_size);
+	ctxt->exofatal = emusd_file_read(value, &ctxt->exofatal_size);
 	if (!ctxt->exofatal)
 		return 0;
 

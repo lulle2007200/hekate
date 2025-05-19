@@ -35,6 +35,7 @@ typedef enum _sdmmc_type
 	MMC_EMUMMC_RAW_SD    = 3,
 	MMC_EMUMMC_RAW_EMMC  = 4,
 	MMC_EMUMMC_FILE_EMMC = 5,
+	MMC_FILE_BASED       = 6,
 
 	EMMC_GPP   = 0,
 	EMMC_BOOT0 = 1,

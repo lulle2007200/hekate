@@ -40,5 +40,10 @@ int  emusd_storage_end();
 int  emusd_storage_read(u32 sector, u32 num_sectors, void *buf);
 int  emusd_storage_write(u32 sector, u32 num_sectors, void *buf);
 sdmmc_storage_t *emusd_get_storage();
+bool emusd_is_gpt();
+int emusd_get_fs_type();
+bool emusd_mount();
+bool emusd_unmount();
+void *emusd_file_read(const char *path, u32 *fsize);
 
 #endif

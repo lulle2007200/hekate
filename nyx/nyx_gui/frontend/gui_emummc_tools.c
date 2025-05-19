@@ -864,7 +864,7 @@ static lv_res_t _create_mbox_emummc_create(lv_obj_t *btn)
 		"Welcome to #C7EA46 emuMMC# creation tool!\n\n"
 		"Please choose what type of emuMMC you want to create.\n"
 		"#FF8000 File based# is saved as files in\nthe SD or eMMC FAT partition.\n"
-		"#FF8000 Partition based# is saved as raw image in a\navailable SD or eMMC partition.");
+		"#FF8000 Partition based# is saved as raw image in an\navailable SD or eMMC partition.");
 
 	lv_mbox_add_btns(mbox, mbox_btn_map, _create_emummc_select_type_action);
 

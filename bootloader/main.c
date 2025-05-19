@@ -418,7 +418,8 @@ static void _launch_ini_list()
 			}
 
 			if (emusd_path && !emusd_set_path(emusd_path)){
-				EPRINTF("emusdpath is wrong!");
+				EPRINTFARGS("path: %s", emusd_path);
+				EPRINTF("error: emusdpath is wrong!");
 				goto wrong_emupath;
 			}
 		}
@@ -579,7 +580,8 @@ static void _launch_config()
 
 		if (emusd_path && !emusd_set_path(emusd_path))
 		{
-			EPRINTF("emusdpath is wrong!");
+			EPRINTFARGS("path: %s", emusd_path);
+			EPRINTF("error: emusdpath is wrong!");
 			goto wrong_emupath;
 		}
 	}
@@ -1056,7 +1058,8 @@ skip_list:
 		if (emusd_path && !emusd_set_path(emusd_path))
 		{
 			gfx_con.mute = false;
-			EPRINTF("emusdpath is wrong!");
+			EPRINTFARGS("path: %s", emusd_path);
+			EPRINTF("error: emusdpath is wrong!");
 			goto wrong_emupath;
 		}
 

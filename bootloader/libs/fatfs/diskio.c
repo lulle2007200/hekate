@@ -7,9 +7,9 @@
 /* storage control modules to the FatFs module with a defined API.       */
 /*-----------------------------------------------------------------------*/
 
+#include "../../storage/emusd.h"
 #include <storage/sd.h>
 #include <storage/sdmmc.h>
-#include <string.h>
 
 #include <bdk.h>
 
@@ -28,6 +28,8 @@ static bool ensure_partition(BYTE pdrv){
 	case DRIVE_EMMC:
 		part = EMMC_GPP;
 		break;
+	case DRIVE_EMUSD:
+		return true;
 	default:
 		return false;
 	}
@@ -86,6 +88,9 @@ DRESULT disk_read (
 			storage = &emmc_storage;
 			actual_sector = sector + (0x100000 / 512);
 			break;
+		case DRIVE_EMUSD:
+			return emusd_storage_read(sector, count, buff) ? RES_OK : RES_ERROR;
+			break;
 		default:
 			return RES_ERROR;
 
@@ -122,6 +127,8 @@ DRESULT disk_write (
 			storage = &emmc_storage;
 			actual_sector = sector + (0x100000 / 512);
 			break;
+		case DRIVE_EMUSD:
+			return emusd_storage_write(sector, count, (void*)buff) ? RES_OK : RES_ERROR;
 		default:
 			return RES_ERROR;
 

@@ -77,6 +77,7 @@ typedef struct
 	union 
 	{
 		emummc_partition_config_t partition_cfg;
+		emummc_file_config_t file_cfg;
 	};
 } emummc_sd_config_t;
 
@@ -226,7 +227,7 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 	if (!ctxt->stock)
 	{
 		LIST_INIT(ini_exo_sections);
-		if (ini_parse(&ini_exo_sections, "exosphere.ini", false))
+		if (ini_parse(&ini_exo_sections, "emusd:exosphere.ini", false))
 		{
 			LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_exo_sections, link)
 			{
@@ -265,7 +266,7 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 		if (!ctxt->exo_ctx.usb3_force)
 		{
 			LIST_INIT(ini_sys_sections);
-			if (ini_parse(&ini_sys_sections, "atmosphere/config/system_settings.ini", false))
+			if (ini_parse(&ini_sys_sections, "emusd:atmosphere/config/system_settings.ini", false))
 			{
 				LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_sys_sections, link)
 				{
@@ -375,12 +376,27 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 	{
 		exo_cfg->emummc_cfg.sd_cfg.base_cfg.fs_ver = emu_sd_cfg.fs_ver;
 		exo_cfg->emummc_cfg.sd_cfg.partition_cfg.start_sector = emu_sd_cfg.sector;
-		if(emu_sd_cfg.enabled == 4 && emu_sd_cfg.sector) {
+		if (emu_sd_cfg.enabled == 4 && emu_sd_cfg.sector) {
+			// emmc partition based
 			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_Partition_Emmc;
-		}else {
+		} else if (emu_sd_cfg.enabled == 4 && !emu_sd_cfg.sector) {
+			// emmc file based
+			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_File_Emmc;
+		} else if (emu_sd_cfg.enabled == 1 && emu_sd_cfg.sector) {
+			// sd partition based
+			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_Partition_Sd;
+		} else if (emu_sd_cfg.enabled == 1 && !emu_sd_cfg.sector) {
+			// sd file based
+			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_File_Sd;
+		} else {
+			// disabled
 			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_None;
 		}
 
+		if (emu_sd_cfg.sector)
+			exo_cfg->emummc_cfg.sd_cfg.partition_cfg.start_sector = emu_sd_cfg.sector;
+		else
+			strcpy((char *)exo_cfg->emummc_cfg.sd_cfg.file_cfg.path, emu_sd_cfg.path);
 	} else {
 		exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_None;
 	}

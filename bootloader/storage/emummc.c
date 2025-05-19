@@ -24,7 +24,6 @@
 
 #include "emummc.h"
 #include "../config.h"
-#include "gfx_utils.h"
 #include <libs/fatfs/ff.h>
 #include <storage/emummc_file_based.h>
 
@@ -174,11 +173,6 @@ static int emummc_raw_get_part_off(int part_idx)
 
 int emummc_storage_init_mmc()
 {
-	gfx_con.mute = false;
-
-
-	gfx_printf("en %d path %s\n", emu_cfg.enabled, emu_cfg.path);
-
 	// FILINFO fno;
 	emu_cfg.active_part = 0;
 
@@ -263,33 +257,6 @@ int emummc_storage_read(u32 sector, u32 num_sectors, void *buf)
 	else
 	{
 		return emummc_storage_file_based_read(sector, num_sectors, buf);
-		// if (!emu_cfg.active_part)
-		// {
-		// 	u32 file_part = sector / emu_cfg.file_based_part_size;
-		// 	sector = sector % emu_cfg.file_based_part_size;
-		// 	if (file_part >= 10)
-		// 		itoa(file_part, emu_cfg.emummc_file_based_path + strlen(emu_cfg.emummc_file_based_path) - 2, 10);
-		// 	else
-		// 	{
-		// 		emu_cfg.emummc_file_based_path[strlen(emu_cfg.emummc_file_based_path) - 2] = '0';
-		// 		itoa(file_part, emu_cfg.emummc_file_based_path + strlen(emu_cfg.emummc_file_based_path) - 1, 10);
-		// 	}
-		// }
-		// if (f_open(&fp, emu_cfg.emummc_file_based_path, FA_READ))
-		// {
-		// 	EPRINTF("Failed to open emuMMC image.");
-		// 	return 0;
-		// }
-		// f_lseek(&fp, (u64)sector << 9);
-		// if (f_read(&fp, buf, (u64)num_sectors << 9, NULL))
-		// {
-		// 	EPRINTF("Failed to read emuMMC image.");
-		// 	f_close(&fp);
-		// 	return 0;
-		// }
-
-		// f_close(&fp);
-		// return 1;
 	}
 
 	return 1;
@@ -310,31 +277,6 @@ int emummc_storage_write(u32 sector, u32 num_sectors, void *buf)
 	else
 	{
 		return emummc_storage_file_based_write(sector, num_sectors, buf);
-		// if (!emu_cfg.active_part)
-		// {
-		// 	u32 file_part = sector / emu_cfg.file_based_part_size;
-		// 	sector = sector % emu_cfg.file_based_part_size;
-		// 	if (file_part >= 10)
-		// 		itoa(file_part, emu_cfg.emummc_file_based_path + strlen(emu_cfg.emummc_file_based_path) - 2, 10);
-		// 	else
-		// 	{
-		// 		emu_cfg.emummc_file_based_path[strlen(emu_cfg.emummc_file_based_path) - 2] = '0';
-		// 		itoa(file_part, emu_cfg.emummc_file_based_path + strlen(emu_cfg.emummc_file_based_path) - 1, 10);
-		// 	}
-		// }
-
-		// if (f_open(&fp, emu_cfg.emummc_file_based_path, FA_WRITE))
-		// 	return 0;
-
-		// f_lseek(&fp, (u64)sector << 9);
-		// if (f_write(&fp, buf, (u64)num_sectors << 9, NULL))
-		// {
-		// 	f_close(&fp);
-		// 	return 0;
-		// }
-
-		// f_close(&fp);
-		// return 1;
 	}
 }
 

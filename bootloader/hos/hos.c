@@ -782,9 +782,15 @@ void hos_launch(ini_sec_t *cfg)
 		goto error;
 	}
 
+	gfx_con.mute = false;
+	if (emusd_storage_init_mmc() || !emusd_mount()) {
+		_hos_crit_error("error: Failed to init emuSD.");
+
+		goto error;
+	}
+
 	// Check if SD Card is GPT.
-	// TODO: not relevant with emuSD
-	if (sd_is_gpt())
+	if (emusd_is_gpt())
 	{
 		_hos_crit_error("SD has GPT only! Run Fix Hybrid MBR!");
 		goto error;
@@ -804,6 +810,8 @@ void hos_launch(ini_sec_t *cfg)
 		if (ctxt.stock && (h_cfg.t210b01 || !tools_autorcm_enabled()))
 		{
 			sdram_src_pllc(false);
+			emummc_storage_end();
+			emusd_storage_end();
 			emmc_end();
 
 			WPRINTF("\nRebooting to OFW in 5s...");
@@ -1053,7 +1061,7 @@ void hos_launch(ini_sec_t *cfg)
 	{
 		bool exfat_compat = _get_fs_exfat_compatible(&kip1_info, &ctxt.exo_ctx.hos_revision);
 
-		if (sd_fs.fs_type == FS_EXFAT && !exfat_compat)
+		if (emusd_get_fs_type() == FS_EXFAT && !exfat_compat)
 		{
 			_hos_crit_error("SD Card is exFAT but installed HOS driver\nonly supports FAT32!");
 
@@ -1086,6 +1094,8 @@ void hos_launch(ini_sec_t *cfg)
 		config_exosphere(&ctxt, warmboot_base);
 
 	// Unmount SD card and eMMC.
+	emummc_storage_end();
+	emusd_storage_end();
 	boot_storage_end();
 	sd_end();
 	emmc_end();
@@ -1201,6 +1211,8 @@ void hos_launch(ini_sec_t *cfg)
 error:
 	_free_launch_components(&ctxt);
 	sdram_src_pllc(false);
+	emummc_storage_end();
+	emusd_storage_end();
 	emmc_end();
 
 	EPRINTF("\nFailed to launch HOS!");

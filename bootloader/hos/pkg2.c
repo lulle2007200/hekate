@@ -77,6 +77,7 @@ static void parse_external_kip_patches()
 		return;
 
 	LIST_INIT(ini_kip_sections);
+	// TODO: load frome emusd?
 	if (ini_patch_parse(&ini_kip_sections, "bootloader/patches.ini"))
 	{
 		// Copy ids into a new patchset.

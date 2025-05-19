@@ -18,6 +18,7 @@
  */
 
 #include <storage/boot_storage.h>
+#include "../storage/emusd.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -370,13 +371,13 @@ int pkg1_warmboot_config(void *hos_ctxt, u32 warmboot_base, u32 fuses_fw, u8 kb)
 		if (!ctxt->warmboot)
 		{
 			char path[128];
-			strcpy(path, "warmboot_mariko/wb_");
+			strcpy(path, "emusd:warmboot_mariko/wb_");
 			_warmboot_filename(path, fuses_fw);
 
 			// Check if warmboot fw exists and save it.
 			if (ctxt->warmboot_size && f_stat(path, NULL))
 			{
-				f_mkdir("warmboot_mariko");
+				f_mkdir("emusd:warmboot_mariko");
 				sd_save_to_file((void *)warmboot_base, ctxt->warmboot_size, path);
 			}
 
@@ -389,7 +390,7 @@ int pkg1_warmboot_config(void *hos_ctxt, u32 warmboot_base, u32 fuses_fw, u8 kb)
 					_warmboot_filename(path, burnt_fuses);
 					if (!f_stat(path, NULL))
 					{
-						ctxt->warmboot = boot_storage_file_read(path, &ctxt->warmboot_size);
+						ctxt->warmboot = emusd_file_read(path + 6, &ctxt->warmboot_size);
 						burnt_fuses = tmp_fuses;
 						break;
 					}
