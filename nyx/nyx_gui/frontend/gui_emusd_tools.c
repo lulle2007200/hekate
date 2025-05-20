@@ -106,7 +106,7 @@ static lv_res_t _emusd_create_action(lv_obj_t *btns, const char *txt){
 		}else{
 			emmc_end(false);
 		}
-		if(res){
+		if(res == FR_OK){
 			lv_mbox_set_text(mbox,
 			"#FF8000 emuSD creation tool#\n\n"
 			"#00DDFF Status:# Done!");
