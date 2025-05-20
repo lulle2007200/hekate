@@ -96,7 +96,8 @@ typedef struct _exo_cfg_t
 	u8  uart_port;
 	u8  uart_invert;
 	u32 uart_baudrate;
-	u32 rsvd1[2];
+	u8  memory_mode_auto;
+	u8  rsvd1[7];
 	exo_emummc_config_t emummc_cfg;
 } exo_cfg_t;
 
@@ -249,6 +250,8 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 					{
 						if (!strcmp("blank_prodinfo_emummc", kv->key))
 							cal0_blanking = atoi(kv->val);
+					} else if (!strcmp("memory_mode_auto", kv->key)) {
+						exo_cfg->memory_mode_auto = atoi(kv->val);
 					}
 					else
 					{
