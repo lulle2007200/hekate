@@ -340,11 +340,13 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 
 	// By default, disable emuMMC
 	exo_cfg->emummc_cfg.emmc_cfg.base_cfg.magic = EMUMMC_MAGIC;
-	exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_None;
+	exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type  = EmummcType_None;
 	if (emu_cfg.enabled && !h_cfg.emummc_force_disable)
 	{
 		exo_cfg->emummc_cfg.emmc_cfg.base_cfg.fs_ver = emu_cfg.fs_ver;
-		exo_cfg->emummc_cfg.emmc_cfg.base_cfg.id = emu_cfg.id;
+		exo_cfg->emummc_cfg.sd_cfg.base_cfg.fs_ver   = emu_sd_cfg.fs_ver;
+		
+		exo_cfg->emummc_cfg.emmc_cfg.base_cfg.id     = emu_cfg.id;
 		if (emu_cfg.enabled == 4 && emu_cfg.sector) {
 			// emmc partition based
 			exo_cfg->emummc_cfg.emmc_cfg.base_cfg.type = EmummcType_Partition_Emmc;
@@ -374,11 +376,13 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 	}
 
 	exo_cfg->emummc_cfg.sd_cfg.base_cfg.magic = EMUMMC_MAGIC;
-	exo_cfg->emummc_cfg.sd_cfg.base_cfg.id = emu_sd_cfg.id;
+	exo_cfg->emummc_cfg.sd_cfg.base_cfg.type  = EmummcType_None;
 	if (emu_sd_cfg.enabled) 
 	{
-		exo_cfg->emummc_cfg.sd_cfg.base_cfg.fs_ver = emu_sd_cfg.fs_ver;
-		exo_cfg->emummc_cfg.sd_cfg.partition_cfg.start_sector = emu_sd_cfg.sector;
+		exo_cfg->emummc_cfg.sd_cfg.base_cfg.fs_ver   = emu_sd_cfg.fs_ver;
+		exo_cfg->emummc_cfg.emmc_cfg.base_cfg.fs_ver = emu_sd_cfg.fs_ver;
+
+		exo_cfg->emummc_cfg.sd_cfg.base_cfg.id     = emu_sd_cfg.id;
 		if (emu_sd_cfg.enabled == 4 && emu_sd_cfg.sector) {
 			// emmc partition based
 			exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_Partition_Emmc;
@@ -400,8 +404,6 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 			exo_cfg->emummc_cfg.sd_cfg.partition_cfg.start_sector = emu_sd_cfg.sector;
 		else
 			strcpy((char *)exo_cfg->emummc_cfg.sd_cfg.file_cfg.path, emu_sd_cfg.path);
-	} else {
-		exo_cfg->emummc_cfg.sd_cfg.base_cfg.type = EmummcType_None;
 	}
 
 	// Copy over exosphere fatal for Mariko.
