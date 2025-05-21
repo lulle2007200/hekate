@@ -87,7 +87,6 @@ bool emusd_unmount() {
 }
 
 bool emusd_set_path(char *path) {
-	gfx_con.mute = false;
 	FIL fp;
 	bool found = false;
 	// TODO: use emu_sd.file_path  instead
