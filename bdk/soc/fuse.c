@@ -113,7 +113,8 @@ u32 fuse_read_dramid(bool raw_id)
 			dramid = 8;
 	}
 
-	return dramid;
+	return 0;
+	// return dramid;
 }
 
 u32 fuse_read_hw_state()
