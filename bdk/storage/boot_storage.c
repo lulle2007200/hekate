@@ -121,15 +121,12 @@ static bool _boot_storage_mount(){
 	for(BYTE i = 0; i < ARRAY_SIZE(emmc_drives); i++){
 		res = f_mount(&boot_storage_fs, drive_base_paths[emmc_drives[i]], true);
 		if(res == FR_OK){
-			gfx_printf("trying %s\n", drive_base_paths[emmc_drives[i]]);
 			res = f_chdrive(drive_base_paths[emmc_drives[i]]);
 			if(res == FR_OK && _is_eligible()){
-				gfx_printf("%s ok\n", drive_base_paths[emmc_drives[i]]);
 				drive_cur = emmc_drives[i];
 				drive = drive_cur;
 				break;
 			}else{
-				gfx_printf("%s fail\n", drive_base_paths[emmc_drives[i]]);
 				f_mount(NULL, drive_base_paths[emmc_drives[i]],false);
 				res = FR_INVALID_DRIVE;
 			}

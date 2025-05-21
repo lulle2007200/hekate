@@ -94,14 +94,10 @@ bool emusd_set_path(char *path) {
 	strcat(emu_sd_cfg.emummc_file_based_path, "");
 	strcpy(emu_sd_cfg.emummc_file_based_path, path);
 	strcat(emu_sd_cfg.emummc_file_based_path, "/raw_emmc_based");
-	gfx_printf("1 %s \n", emu_sd_cfg.emummc_file_based_path);
 	if(!f_open(&fp, emu_sd_cfg.emummc_file_based_path, FA_READ))
 	{
-		gfx_printf("open done\n");
 		if(!f_read(&fp, &emu_sd_cfg.sector, 4, NULL)){
-			gfx_printf("found sct\n");
 			if(emu_sd_cfg.sector){
-				gfx_printf("!=0\n");
 				found = true;
 				emu_sd_cfg.enabled = 4;
 				goto out;
@@ -112,14 +108,10 @@ bool emusd_set_path(char *path) {
 	strcpy(emu_sd_cfg.emummc_file_based_path, "");
 	strcat(emu_sd_cfg.emummc_file_based_path, path);
 	strcat(emu_sd_cfg.emummc_file_based_path, "/raw_emmc_based");
-	gfx_printf("1 %s \n", emu_sd_cfg.emummc_file_based_path);
 	if (!f_open(&fp, emu_sd_cfg.emummc_file_based_path, FA_READ))
 	{
-		gfx_printf("open done\n");
 		if (!f_read(&fp, &emu_sd_cfg.sector, 4, NULL)){
-				gfx_printf("found sct\n");
 			if (emu_sd_cfg.sector){
-				gfx_printf("!=0\n");
 				found = true;
 				emu_sd_cfg.enabled = 4;
 				goto out;
@@ -131,15 +123,12 @@ bool emusd_set_path(char *path) {
 	strcpy(emu_sd_cfg.emummc_file_based_path, "");
 	strcat(emu_sd_cfg.emummc_file_based_path, path);
 	strcat(emu_sd_cfg.emummc_file_based_path, "/file_based");
-	gfx_printf("1 %s \n", emu_sd_cfg.emummc_file_based_path);
 	if (!f_stat(emu_sd_cfg.emummc_file_based_path, NULL))
 	{
-		gfx_printf("open done\n");
 		emu_sd_cfg.sector = 0;
 		emu_sd_cfg.path = path;
 		emu_sd_cfg.enabled = 1;
 
-		gfx_printf("path %s\n", emu_sd_cfg.path);
 		found = true;
 		goto out;
 	}
@@ -148,15 +137,12 @@ bool emusd_set_path(char *path) {
 	strcpy(emu_sd_cfg.emummc_file_based_path, "");
 	strcat(emu_sd_cfg.emummc_file_based_path, path);
 	strcat(emu_sd_cfg.emummc_file_based_path, "/file_emmc_based");
-	gfx_printf("1 %s \n", emu_sd_cfg.emummc_file_based_path);
 	if (!f_stat(emu_sd_cfg.emummc_file_based_path, NULL))
 	{
-		gfx_printf("open done\n");
 		emu_sd_cfg.sector = 0;
 		emu_sd_cfg.path = path;
 		emu_sd_cfg.enabled = 4;
 
-		gfx_printf("path %s\n", emu_sd_cfg.path);
 		found = true;
 		goto out;
 	}

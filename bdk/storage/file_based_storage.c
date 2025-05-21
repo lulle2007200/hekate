@@ -2,7 +2,6 @@
 #include <libs/fatfs/ff.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gfx_utils.h"
 
 typedef struct{
 	FIL active_file;
@@ -21,8 +20,6 @@ int file_based_storage_init(const char *base_path) {
 	strcpy(ctx.base_path, base_path);
 	strcat(ctx.base_path, "00");
 
-	gfx_printf("file based init %d %s\n", ctx.base_path_len, ctx.base_path);
-
 	FILINFO fi;
 	if(f_stat(ctx.base_path, &fi) != FR_OK) {
 		return 0;
@@ -30,7 +27,6 @@ int file_based_storage_init(const char *base_path) {
 
 	if(fi.fsize) {
 		ctx.part_sz_sct = fi.fsize >> 9;
-		gfx_printf("file based init sz 0x%x\n", ctx.part_sz_sct);
 	}else{
 		return 0;
 	}
@@ -67,7 +63,6 @@ static int file_based_storage_change_file(const char *name, s32 idx) {
 	#endif
 
 	if(res != FR_OK){
-		gfx_printf("file based open fail %s\n", ctx.base_path);
 		return res;
 	}
 
@@ -95,7 +90,6 @@ static int file_based_storage_readwrite_single(u32 sector, u32 num_sectors, void
 	}
 
 	if(res != FR_OK){
-		gfx_printf("file based rw fail %s 0x%x 0x%x \n", ctx.base_path, num_sectors, sector);
 		return res;
 	}
 

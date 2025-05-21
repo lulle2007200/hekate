@@ -222,7 +222,7 @@ static int _stat_and_copy_files(const char *src, const char *dst, char *path, u3
 	u32 dirLength = 0;
 	static FILINFO fno;
 
-	DBG_PRINT_ARGS("chdrive %d", f_chdrive(src));
+	f_chdrive(src);
 
 	// Open directory.
 	res = f_opendir(&dir, path);
@@ -287,9 +287,9 @@ static int _stat_and_copy_files(const char *src, const char *dst, char *path, u3
 
 				// Open file for writing.
 				f_chdrive(dst);
-				DBG_PRINT_ARGS("open %d", f_open(&fp_dst, path, FA_CREATE_ALWAYS | FA_WRITE));
-				DBG_PRINT_ARGS("seek1 %d", f_lseek(&fp_dst, fno.fsize));
-				DBG_PRINT_ARGS("seek2 %d", f_lseek(&fp_dst, 0));
+				f_open(&fp_dst, path, FA_CREATE_ALWAYS | FA_WRITE);
+				f_lseek(&fp_dst, fno.fsize);
+				f_lseek(&fp_dst, 0);
 
 				// Open file for reading.
 				f_chdrive(src);
@@ -1793,7 +1793,10 @@ static int _backup_and_restore_files(bool backup, const char *drive, lv_obj_t **
 
 	// Copy all or hekate/Nyx files.
 	DBG_PRINT("start stat");
+	gfx_printf("src %s\ndst %s\npath %s\n", src_drv, dst_drv, path);
 	res = _stat_and_copy_files(src_drv, dst_drv, path, &total_files, &total_size, labels);
+
+	gfx_printf("bkup res %d mws %d pld %d tot %d\n", res, (u32)backup_mws, (u32)backup_pld, total_files);
 
 	// If incomplete backup mode, copy MWS and payload.bin also.
 	if (!res)
@@ -1998,8 +2001,6 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 		}
 	}
 
-	DBG_PRINT("backup done");
-
 	if(part_info.drive == DRIVE_SD){
 		sd_unmount();
 	}else{
@@ -2040,7 +2041,6 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 				hos_start = new_gpt->entries[hos_idx].lba_start;
 			}
 		}
-
 
 		lv_label_set_text(lbl_status, "#00ddff Status:# Formatting FAT32 partition...");
 		manual_system_maintenance(true);
@@ -2095,10 +2095,11 @@ static lv_res_t _create_mbox_start_partitioning(lv_obj_t *btn)
 			if(part_info.drive == DRIVE_SD){
 				sd_mount();
 			}else{
-				DBG_PRINT_ARGS("emmc mount %d", emmc_mount());
+				emmc_mount();
 			}
 
-			f_setlabel(part_info.drive == DRIVE_SD ? "sd:SWITCH SD" : "emmc:SWITCH EMMC");
+			int res = f_setlabel(part_info.drive == DRIVE_SD ? "sd:SWITCH SD" : "emmc:SWITCH EMMC");
+			gfx_printf("setlabel %d\n", res);
 
 			if(boot_storage_get_drive() != part_info.drive){
 				// if we havent booted from the drive currently being formatted, create .no_boot_storage

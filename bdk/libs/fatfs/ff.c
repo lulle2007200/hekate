@@ -41,8 +41,8 @@
 #include <storage/mbr_gpt.h>
 #include <gfx_utils.h>
 
-#define EFSPRINTF(text, ...) print_error(); gfx_printf("%k"text"%k\n", 0xFFFFFF00, 0xFFFFFFFF);
-//#define EFSPRINTF(...)
+// #define EFSPRINTF(text, ...) print_error(); gfx_printf("%k"text"%k\n", 0xFFFFFF00, 0xFFFFFFFF);
+#define EFSPRINTF(...)
 
 /*--------------------------------------------------------------------------
 
