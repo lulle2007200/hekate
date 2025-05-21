@@ -782,7 +782,6 @@ void hos_launch(ini_sec_t *cfg)
 		goto error;
 	}
 
-	gfx_con.mute = false;
 	if (emusd_storage_init_mmc() || !emusd_mount()) {
 		_hos_crit_error("error: Failed to init emuSD.");
 
