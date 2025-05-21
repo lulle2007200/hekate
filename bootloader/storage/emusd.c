@@ -154,6 +154,10 @@ out:
 int emusd_storage_init_mmc() {
 	if(!emusd_initialized) {
 		if (!emu_sd_cfg.enabled || h_cfg.emummc_force_disable) {
+			if(!sd_initialize(false)){
+				return 1;
+			}
+			emusd_initialized = true;
 			return 0;
 		}
 
