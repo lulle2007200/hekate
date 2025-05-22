@@ -236,6 +236,7 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 				if (!(ini_sec->type == INI_CHOICE) || strcmp(ini_sec->name, "exosphere"))
 					continue;
 
+
 				LIST_FOREACH_ENTRY(ini_kv_t, kv, &ini_sec->kvs, link)
 				{
 					if (!strcmp("debugmode_user", kv->key))
@@ -246,14 +247,14 @@ void config_exosphere(launch_ctxt_t *ctxt, u32 warmboot_base)
 						exo_cfg->uart_invert = atoi(kv->val);
 					else if (!strcmp("log_baud_rate", kv->key))
 						exo_cfg->uart_baudrate = atoi(kv->val);
+					else if (!strcmp("memory_mode_auto", kv->key)) {
+						exo_cfg->memory_mode_auto = atoi(kv->val);
+					}
 					else if (emu_cfg.enabled && !h_cfg.emummc_force_disable)
 					{
 						if (!strcmp("blank_prodinfo_emummc", kv->key))
 							cal0_blanking = atoi(kv->val);
-					} else if (!strcmp("memory_mode_auto", kv->key)) {
-						exo_cfg->memory_mode_auto = atoi(kv->val);
-					}
-					else
+					} else
 					{
 						if (!strcmp("blank_prodinfo_sysmmc", kv->key))
 							cal0_blanking = atoi(kv->val);
