@@ -284,12 +284,8 @@ int emummc_storage_set_mmc_partition(u32 partition)
 {
 	emu_cfg.active_part = partition;
 
-	if(h_cfg.emummc_force_disable){
+	if(h_cfg.emummc_force_disable || !emu_cfg.enabled){
 		emmc_set_partition(partition);
-		return 1;
-	}
-
-	if(!emu_cfg.enabled){
 		return 1;
 	}
 
