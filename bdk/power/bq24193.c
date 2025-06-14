@@ -163,6 +163,7 @@ void bq24193_enable_charger()
 	reg |= BQ24193_PORCONFIG_CHGCONFIG_CHARGER_EN;
 
 	i2c_send_byte(I2C_1, BQ24193_I2C_ADDR, BQ24193_PORConfig, reg);
+	i2c_send_byte(I2C_1, BQ24193_I2C_ADDR, BQ24193_ChargeVoltageLimit, 0xca);
 }
 
 void bq24193_fake_battery_removal()
